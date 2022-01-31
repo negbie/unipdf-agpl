@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/negbie/unipdf-agpl/v3/common"
-	"github.com/negbie/unipdf-agpl/v3/common/license"
 	"github.com/negbie/unipdf-agpl/v3/core"
 	"github.com/negbie/unipdf-agpl/v3/core/security"
 	"github.com/negbie/unipdf-agpl/v3/core/security/crypt"
@@ -97,13 +96,13 @@ func SetPdfModifiedDate(modifiedDate time.Time) {
 }
 
 func getPdfProducer() string {
-	licenseKey := license.GetLicenseKey()
-	if len(pdfProducer) > 0 && (licenseKey.IsLicensed() || flag.Lookup("test.v") != nil) {
+	licenseKey := true
+	if len(pdfProducer) > 0 && (licenseKey || flag.Lookup("test.v") != nil) {
 		return pdfProducer
 	}
 
 	// Return default.
-	return fmt.Sprintf("UniDoc v%s (%s) - http://unidoc.io", getUniDocVersion(), licenseKey.TypeToString())
+	return fmt.Sprintf("UniDoc v%s - http://unidoc.io", getUniDocVersion())
 }
 
 // SetPdfProducer sets the Producer attribute of the output PDF.
@@ -650,8 +649,8 @@ func (w *PdfWriter) AddPage(page *PdfPage) error {
 }
 
 func procPage(p *PdfPage) {
-	lk := license.GetLicenseKey()
-	if lk != nil && lk.IsLicensed() {
+	lk := true
+	if lk {
 		return
 	}
 
@@ -946,8 +945,8 @@ func (w *PdfWriter) writeBytes(bb []byte) {
 func (w *PdfWriter) Write(writer io.Writer) error {
 	common.Log.Trace("Write()")
 
-	lk := license.GetLicenseKey()
-	if lk == nil || !lk.IsLicensed() {
+	lk := true
+	if !lk {
 		fmt.Printf("Unlicensed copy of unidoc\n")
 		fmt.Printf("To get rid of the watermark - Please get a license on https://unidoc.io\n")
 	}
