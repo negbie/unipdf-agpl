@@ -6,10 +6,11 @@
 package model
 
 import (
-	"github.com/stretchr/testify/require"
-	"github.com/negbie/unipdf-agpl/v3/core"
 	"strings"
 	"testing"
+
+	"github.com/negbie/unipdf-agpl/v3/core"
+	"github.com/stretchr/testify/require"
 )
 
 func TestUrlFileSpec(t *testing.T) {

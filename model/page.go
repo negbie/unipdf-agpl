@@ -281,42 +281,42 @@ func (r *PdfReader) newPdfPageFromDict(p *core.PdfObjectDictionary) (*PdfPage, e
 
 // GetAnnotations returns the list of page annotations for `page`. If not loaded attempts to load the
 // annotations, otherwise returns the loaded list.
-func (p *PdfPage) GetAnnotations() ([]*PdfAnnotation, error) {
-	if p.annotations != nil {
-		return p.annotations, nil
+func (page *PdfPage) GetAnnotations() ([]*PdfAnnotation, error) {
+	if page.annotations != nil {
+		return page.annotations, nil
 	}
-	if p.Annots == nil {
-		p.annotations = []*PdfAnnotation{}
+	if page.Annots == nil {
+		page.annotations = []*PdfAnnotation{}
 		return nil, nil
 	}
-	if p.reader == nil {
-		p.annotations = []*PdfAnnotation{}
+	if page.reader == nil {
+		page.annotations = []*PdfAnnotation{}
 		return nil, nil
 	}
 
-	annots, err := p.reader.loadAnnotations(p.Annots)
+	annots, err := page.reader.loadAnnotations(page.Annots)
 	if err != nil {
 		return nil, err
 	}
 	if annots == nil {
-		p.annotations = []*PdfAnnotation{}
+		page.annotations = []*PdfAnnotation{}
 	}
 
-	p.annotations = annots
-	return p.annotations, nil
+	page.annotations = annots
+	return page.annotations, nil
 }
 
 // AddAnnotation appends `annot` to the list of page annotations.
-func (p *PdfPage) AddAnnotation(annot *PdfAnnotation) {
-	if p.annotations == nil {
-		p.GetAnnotations() // Ensure has been loaded.
+func (page *PdfPage) AddAnnotation(annot *PdfAnnotation) {
+	if page.annotations == nil {
+		page.GetAnnotations() // Ensure has been loaded.
 	}
-	p.annotations = append(p.annotations, annot)
+	page.annotations = append(page.annotations, annot)
 }
 
 // SetAnnotations sets the annotations list.
-func (p *PdfPage) SetAnnotations(annotations []*PdfAnnotation) {
-	p.annotations = annotations
+func (page *PdfPage) SetAnnotations(annotations []*PdfAnnotation) {
+	page.annotations = annotations
 }
 
 // loadAnnotations loads and returns the PDF annotations from the input annotations object (array).

@@ -8,8 +8,8 @@ package cmap
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/negbie/unipdf-agpl/v3/internal/cmap/bcmaps"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsPredefinedCMap(t *testing.T) {

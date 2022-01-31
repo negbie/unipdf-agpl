@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -375,7 +374,7 @@ var charcodeBytesToUnicodeTest = []fontFragmentTest{
 			242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255},
 		" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`" +
 			"abcdefghijklmnopqrstuvwxyz{|}~€‚ƒ„…†‡ˆ‰Š‹OEŽ‘’“”•–—˜™š›oežŸ¡¢£¤¥¦§¨©ª«¬®¯°±²³´µ¶·" +
-			"¸¹º»¼½¾¿ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞßàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ",
+			"¸¹º»¼½¾¿ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏÐÑÒÓÔÕÖ×ØÙÚÛÜÝÞfzàáâãäåæçèéêëìíîïðñòóôõö÷øùúûüýþÿ",
 	},
 	{"Helvetica built-in",
 		"./testdata/font/simple.txt", 5,
@@ -388,7 +387,7 @@ var charcodeBytesToUnicodeTest = []fontFragmentTest{
 			184, 185, 186, 187, 188, 189, 191, 193, 194, 195, 196, 197, 198, 199, 225, 227, 232, 241, 245, 248, 249,
 			250, 251},
 		` !"#$%&’()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_‘abcdefghijklmnopqrstuvwxyz{|}~` +
-			`¡¢£⁄¥ƒ§¤'“«‹›fifl–†‡·¶•‚„”»…‰¿` + "`" + `´ˆ˜¯˘˙ÆªŁæıłøoeß`,
+			`¡¢£⁄¥ƒ§¤'“«‹›fifl–†‡·¶•‚„”»…‰¿` + "`" + `´ˆ˜¯˘˙ÆªŁæıłøoefz`,
 	},
 	{"Symbol built-in",
 		"./testdata/font/simple.txt", 3,
@@ -435,7 +434,7 @@ var charcodeBytesToUnicodeTest = []fontFragmentTest{
 			225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 241, 242, 243,
 			244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255},
 		" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`" +
-			"abcdefghijklmnopqrstuvwxyz{|}~ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶ß®©™´¨≠ÆØ∞" +
+			"abcdefghijklmnopqrstuvwxyz{|}~ÄÅÇÉÑÖÜáàâäãåçéèêëíìîïñóòôöõúùûü†°¢£§•¶fz®©™´¨≠ÆØ∞" +
 			"±≤≥¥µ∂∑∏π∫ªºΩæø¿¡¬√ƒ≈∆«»…ÀÃÕOEoe–—“”‘’÷◊ÿŸ⁄€‹›fifl‡·‚„‰ÂÊÁËÈÍÎÏÌÓÔÒÚÛÙıˆ˜¯˘˙˚¸˝˛ˇ",
 	},
 	{"Test beginbfchar and beginbfrange cmap entries",
@@ -609,9 +608,9 @@ func (f *fontFragmentTest) check(t *testing.T) {
 			}
 		}
 	}
-	if numChars != utf8.RuneCountInString(actualText) {
+	if numChars != len([]rune(actualText)) {
 		t.Errorf("Incorrect numChars. %s numChars=%d expected=%d\n%+v\n%c",
-			f, numChars, utf8.RuneCountInString(actualText), []rune(actualText), []rune(actualText))
+			f, numChars, len([]rune(actualText)), []rune(actualText), []rune(actualText))
 	}
 }
 

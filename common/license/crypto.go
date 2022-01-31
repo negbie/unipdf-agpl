@@ -8,5 +8,3 @@ package license
 import (
 	_ "github.com/negbie/unipdf-agpl/v3/common"
 )
-
-

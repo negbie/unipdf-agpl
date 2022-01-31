@@ -23,17 +23,9 @@ func (c *CompressStreams) Optimize(objects []core.PdfObject) (optimizedObjects [
 		if !isStreamObj {
 			continue
 		}
-		// Skip objects that are already encoded.
-		// TODO: Try filter combinations, and ignoring inefficient filters.
-		if obj := stream.Get("Filter"); obj != nil {
-			if _, skip := core.GetName(obj); skip {
-				continue
-			}
-			if arr, ok := core.GetArray(obj); ok && arr.Len() > 0 {
-				continue
-			}
+		if _, found := core.GetName(stream.PdfObjectDictionary.Get("Filter")); found {
+			continue
 		}
-
 		encoder := core.NewFlateEncoder() // Most mainstream compressor and probably most robust.
 		var data []byte
 		data, err = encoder.EncodeBytes(stream.Stream)

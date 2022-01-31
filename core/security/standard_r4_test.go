@@ -6,8 +6,9 @@
 package security
 
 import (
-	"github.com/negbie/unipdf-agpl/v3/common"
 	"testing"
+
+	"github.com/negbie/unipdf-agpl/v3/common"
 )
 
 func init() {

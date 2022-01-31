@@ -558,7 +558,7 @@ func TestTableParagraphLinks(t *testing.T) {
 	cell = table.NewCell()
 	cell.SetBorder(CellBorderSideAll, CellBorderStyleSingle, 1)
 	p = c.NewStyledParagraph()
-	p.AddExternalLink("link to UniPDF", "https://github.com/unidoc/unipdf")
+	p.AddExternalLink("link to UniPDF", "https://github.com/negbie/unipdf-agpl")
 	cell.SetContent(p)
 
 	if err := c.Draw(table); err != nil {

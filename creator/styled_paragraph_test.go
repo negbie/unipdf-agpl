@@ -8,8 +8,8 @@ package creator
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/negbie/unipdf-agpl/v3/model"
+	"github.com/stretchr/testify/require"
 )
 
 func TestParagraphRegularVsStyled(t *testing.T) {

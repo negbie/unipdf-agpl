@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/negbie/unipdf-agpl/v3/common"
 	"github.com/negbie/unipdf-agpl/v3/core"
@@ -51,7 +50,6 @@ func (font *PdfFont) SubsetRegistered() error {
 	case *pdfFontType0:
 		err := t.subsetRegistered()
 		if err != nil {
-			common.Log.Debug("Subset error: %v", err)
 			return err
 		}
 		if t.container != nil {
@@ -403,7 +401,6 @@ func (font *PdfFont) BytesToCharcodes(data []byte) []textencoding.CharCode {
 
 	charcodes := make([]textencoding.CharCode, 0, len(data)+len(data)%2)
 	if font.baseFields().isCIDFont() {
-		// Identity only?
 		if len(data) == 1 {
 			data = []byte{0, data[0]}
 		}
@@ -416,7 +413,6 @@ func (font *PdfFont) BytesToCharcodes(data []byte) []textencoding.CharCode {
 			charcodes = append(charcodes, textencoding.CharCode(b))
 		}
 	} else {
-		// Simple font: byte -> charcode.
 		for _, b := range data {
 			charcodes = append(charcodes, textencoding.CharCode(b))
 		}
@@ -486,8 +482,14 @@ func (font *PdfFont) CharcodesToStrings(charcodes []textencoding.CharCode) ([]st
 //   encoding and use the glyph indices as character codes, as described following Table 118.
 func (font *PdfFont) CharcodeBytesToUnicode(data []byte) (string, int, int) {
 	runes, _, numMisses := font.CharcodesToUnicodeWithStats(font.BytesToCharcodes(data))
-	str := textencoding.ExpandLigatures(runes)
-	return str, utf8.RuneCountInString(str), numMisses
+
+	var buffer bytes.Buffer
+	for _, r := range runes {
+		buffer.WriteString(textencoding.RuneToString(r))
+	}
+
+	str := buffer.String()
+	return str, len([]rune(str)), numMisses
 }
 
 // CharcodesToUnicode converts the character codes `charcodes` to a slice of runes.
@@ -702,9 +704,10 @@ func (base fontCommon) asPdfObjectDictionary(subtype string) *core.PdfObjectDict
 	if base.toUnicode != nil {
 		d.Set("ToUnicode", base.toUnicode)
 	} else if base.toUnicodeCmap != nil {
-		o, err := base.toUnicodeCmap.Stream()
+		data := base.toUnicodeCmap.Bytes()
+		o, err := core.MakeStream(data, core.NewFlateEncoder())
 		if err != nil {
-			common.Log.Debug("WARN: could not get CMap stream. err=%v", err)
+			common.Log.Debug("MakeStream failed. err=%v", err)
 		} else {
 			d.Set("ToUnicode", o)
 		}
@@ -752,7 +755,8 @@ func (base fontCommon) isCIDFont() bool {
 // newFontBaseFieldsFromPdfObject returns `fontObj` as a dictionary the common fields from that
 // dictionary in the fontCommon return.  If there is a problem an error is returned.
 // The fontCommon is the group of fields common to all PDF fonts.
-func newFontBaseFieldsFromPdfObject(fontObj core.PdfObject) (*core.PdfObjectDictionary, *fontCommon, error) {
+func newFontBaseFieldsFromPdfObject(fontObj core.PdfObject) (*core.PdfObjectDictionary, *fontCommon,
+	error) {
 	font := &fontCommon{}
 
 	if obj, ok := fontObj.(*core.PdfIndirectObject); ok {

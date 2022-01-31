@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"sort"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/negbie/unipdf-agpl/v3/common"
+	"github.com/negbie/unipdf-agpl/v3/common/license"
 	"github.com/negbie/unipdf-agpl/v3/core"
 	"github.com/negbie/unipdf-agpl/v3/core/security"
 	"github.com/negbie/unipdf-agpl/v3/core/security/crypt"
@@ -95,12 +97,13 @@ func SetPdfModifiedDate(modifiedDate time.Time) {
 }
 
 func getPdfProducer() string {
-	if len(pdfProducer) > 0 {
+	licenseKey := license.GetLicenseKey()
+	if len(pdfProducer) > 0 && (licenseKey.IsLicensed() || flag.Lookup("test.v") != nil) {
 		return pdfProducer
 	}
 
 	// Return default.
-	return fmt.Sprintf("UniDoc v%s (%s) AGPL")
+	return fmt.Sprintf("UniDoc v%s (%s) - http://unidoc.io", getUniDocVersion(), licenseKey.TypeToString())
 }
 
 // SetPdfProducer sets the Producer attribute of the output PDF.
@@ -130,7 +133,6 @@ func SetPdfTitle(title string) {
 type PdfWriter struct {
 	root        *core.PdfIndirectObject
 	pages       *core.PdfIndirectObject
-	pagesMap    map[core.PdfObject]struct{} // Pages lookup table.
 	objects     []core.PdfObject            // Objects to write.
 	objectsMap  map[core.PdfObject]struct{} // Quick lookup table.
 	outlines    []*core.PdfIndirectObject
@@ -254,7 +256,6 @@ func NewPdfWriter() PdfWriter {
 	pages.PdfObject = pagedict
 
 	w.pages = &pages
-	w.pagesMap = map[core.PdfObject]struct{}{}
 	w.addObject(w.pages)
 
 	catalogDict.Set("Pages", &pages)
@@ -269,143 +270,114 @@ func NewPdfWriter() PdfWriter {
 // fills objectToObjectCopyMap to replace the old object to the copy of object if needed.
 // Parameter objectToObjectCopyMap is needed to replace object references to its copies.
 // Because many objects can contain references to another objects like pages to images.
-// If a skip map is provided and the writer is not set to append mode, the
-// children objects of pages which are not present in the catalog are added to
-// the map and the page dictionaries are replaced with null objects.
-func (w *PdfWriter) copyObject(obj core.PdfObject,
-	objectToObjectCopyMap map[core.PdfObject]core.PdfObject,
-	skipMap map[core.PdfObject]struct{}, skip bool) core.PdfObject {
+func copyObject(obj core.PdfObject, objectToObjectCopyMap map[core.PdfObject]core.PdfObject) core.PdfObject {
 	if newObj, ok := objectToObjectCopyMap[obj]; ok {
 		return newObj
 	}
 
-	newObj := obj
-	skipUnusedPages := !w.appendMode && skipMap != nil
 	switch t := obj.(type) {
 	case *core.PdfObjectArray:
-		arrObj := core.MakeArray()
-		newObj = arrObj
+		newObj := &core.PdfObjectArray{}
 		objectToObjectCopyMap[obj] = newObj
 		for _, val := range t.Elements() {
-			arrObj.Append(w.copyObject(val, objectToObjectCopyMap, skipMap, skip))
+			newObj.Append(copyObject(val, objectToObjectCopyMap))
 		}
+		return newObj
 	case *core.PdfObjectStreams:
-		streamsObj := &core.PdfObjectStreams{PdfObjectReference: t.PdfObjectReference}
-		newObj = streamsObj
+		newObj := &core.PdfObjectStreams{PdfObjectReference: t.PdfObjectReference}
 		objectToObjectCopyMap[obj] = newObj
 		for _, val := range t.Elements() {
-			streamsObj.Append(w.copyObject(val, objectToObjectCopyMap, skipMap, skip))
+			newObj.Append(copyObject(val, objectToObjectCopyMap))
 		}
+		return newObj
 	case *core.PdfObjectStream:
-		streamObj := &core.PdfObjectStream{
+		newObj := &core.PdfObjectStream{
 			Stream:             t.Stream,
 			PdfObjectReference: t.PdfObjectReference,
 		}
-		newObj = streamObj
 		objectToObjectCopyMap[obj] = newObj
-		streamObj.PdfObjectDictionary = w.copyObject(t.PdfObjectDictionary, objectToObjectCopyMap, skipMap, skip).(*core.PdfObjectDictionary)
+		newObj.PdfObjectDictionary = copyObject(t.PdfObjectDictionary, objectToObjectCopyMap).(*core.PdfObjectDictionary)
+		return newObj
 	case *core.PdfObjectDictionary:
-		// Check if the object is a page dictionary and search it in the
-		// writer pages. If not found, replace it with a null object and add
-		// the chain of children objects to the skip map.
-		var unused bool
-		if skipUnusedPages && !skip {
-			if dictType, _ := core.GetNameVal(t.Get("Type")); dictType == "Page" {
-				_, ok := w.pagesMap[t]
-				skip = !ok
-				unused = skip
-			}
-		}
-
-		dictObj := core.MakeDict()
-		newObj = dictObj
+		newObj := core.MakeDict()
 		objectToObjectCopyMap[obj] = newObj
 		for _, key := range t.Keys() {
-			dictObj.Set(key, w.copyObject(t.Get(key), objectToObjectCopyMap, skipMap, skip))
+			val := t.Get(key)
+			newObj.Set(key, copyObject(val, objectToObjectCopyMap))
 		}
-
-		// If an unused page dictionary is found, replace it with a null object.
-		if unused {
-			newObj = core.MakeNull()
-			skip = false
-		}
+		return newObj
 	case *core.PdfIndirectObject:
-		indObj := &core.PdfIndirectObject{
+		newObj := &core.PdfIndirectObject{
 			PdfObjectReference: t.PdfObjectReference,
 		}
-		newObj = indObj
 		objectToObjectCopyMap[obj] = newObj
-		indObj.PdfObject = w.copyObject(t.PdfObject, objectToObjectCopyMap, skipMap, skip)
+		newObj.PdfObject = copyObject(t.PdfObject, objectToObjectCopyMap)
+		return newObj
 	case *core.PdfObjectString:
-		strObj := *t
-		newObj = &strObj
+		newObj := &core.PdfObjectString{}
+		*newObj = *t
 		objectToObjectCopyMap[obj] = newObj
+		return newObj
 	case *core.PdfObjectName:
-		nameObj := core.PdfObjectName(*t)
-		newObj = &nameObj
-		objectToObjectCopyMap[obj] = newObj
+		newObj := core.PdfObjectName(*t)
+		objectToObjectCopyMap[obj] = &newObj
+		return &newObj
 	case *core.PdfObjectNull:
-		newObj = core.MakeNull()
-		objectToObjectCopyMap[obj] = newObj
+		newObj := core.PdfObjectNull{}
+		objectToObjectCopyMap[obj] = &newObj
+		return &newObj
 	case *core.PdfObjectInteger:
-		intObj := core.PdfObjectInteger(*t)
-		newObj = &intObj
-		objectToObjectCopyMap[obj] = newObj
+		newObj := core.PdfObjectInteger(*t)
+		objectToObjectCopyMap[obj] = &newObj
+		return &newObj
 	case *core.PdfObjectReference:
-		refObj := core.PdfObjectReference(*t)
-		newObj = &refObj
-		objectToObjectCopyMap[obj] = newObj
+		newObj := core.PdfObjectReference(*t)
+		objectToObjectCopyMap[obj] = &newObj
+		return &newObj
 	case *core.PdfObjectFloat:
-		floatObj := core.PdfObjectFloat(*t)
-		newObj = &floatObj
-		objectToObjectCopyMap[obj] = newObj
+		newObj := core.PdfObjectFloat(*t)
+		objectToObjectCopyMap[obj] = &newObj
+		return &newObj
 	case *core.PdfObjectBool:
-		boolObj := core.PdfObjectBool(*t)
-		newObj = &boolObj
-		objectToObjectCopyMap[obj] = newObj
+		newObj := core.PdfObjectBool(*t)
+		objectToObjectCopyMap[obj] = &newObj
+		return &newObj
 	case *pdfSignDictionary:
-		sigObj := &pdfSignDictionary{
+		newObj := &pdfSignDictionary{
 			PdfObjectDictionary: core.MakeDict(),
 			handler:             t.handler,
 			signature:           t.signature,
 		}
-		newObj = sigObj
 		objectToObjectCopyMap[obj] = newObj
 		for _, key := range t.Keys() {
-			sigObj.Set(key, w.copyObject(t.Get(key), objectToObjectCopyMap, skipMap, skip))
+			val := t.Get(key)
+			newObj.Set(key, copyObject(val, objectToObjectCopyMap))
 		}
+		return newObj
 	default:
 		common.Log.Info("TODO(a5i): implement copyObject for %+v", obj)
 	}
-
-	if skipUnusedPages && skip {
-		skipMap[obj] = struct{}{}
-	}
-
-	return newObj
+	// return other objects as is
+	return obj
 }
 
 // copyObjects makes objects copy and set as working.
 func (w *PdfWriter) copyObjects() {
 	objectToObjectCopyMap := make(map[core.PdfObject]core.PdfObject)
-	objects := make([]core.PdfObject, 0, len(w.objects))
+	objects := make([]core.PdfObject, len(w.objects))
 	objectsMap := make(map[core.PdfObject]struct{}, len(w.objects))
-	skipMap := make(map[core.PdfObject]struct{})
-	for _, obj := range w.objects {
-		newObject := w.copyObject(obj, objectToObjectCopyMap, skipMap, false)
-		if _, ok := skipMap[obj]; ok {
-			continue
-		}
-		objects = append(objects, newObject)
+	for i, obj := range w.objects {
+		newObject := copyObject(obj, objectToObjectCopyMap)
+		objects[i] = newObject
 		objectsMap[newObject] = struct{}{}
 	}
 
 	w.objects = objects
 	w.objectsMap = objectsMap
-	w.infoObj = w.copyObject(w.infoObj, objectToObjectCopyMap, nil, false).(*core.PdfIndirectObject)
-	w.root = w.copyObject(w.root, objectToObjectCopyMap, nil, false).(*core.PdfIndirectObject)
+	w.infoObj = copyObject(w.infoObj, objectToObjectCopyMap).(*core.PdfIndirectObject)
+	w.root = copyObject(w.root, objectToObjectCopyMap).(*core.PdfIndirectObject)
 	if w.encryptObj != nil {
-		w.encryptObj = w.copyObject(w.encryptObj, objectToObjectCopyMap, nil, false).(*core.PdfIndirectObject)
+		w.encryptObj = copyObject(w.encryptObj, objectToObjectCopyMap).(*core.PdfIndirectObject)
 	}
 
 	// Update replace map.
@@ -659,8 +631,6 @@ func (w *PdfWriter) AddPage(page *PdfPage) error {
 		return errors.New("invalid Pages Kids obj (not an array)")
 	}
 	kids.Append(pageObj)
-	w.pagesMap[pDict] = struct{}{}
-
 	pageCount, ok := core.GetInt(pagesDict.Get("Count"))
 	if !ok {
 		return errors.New("invalid Pages Count object (not an integer)")
@@ -680,6 +650,33 @@ func (w *PdfWriter) AddPage(page *PdfPage) error {
 }
 
 func procPage(p *PdfPage) {
+	lk := license.GetLicenseKey()
+	if lk != nil && lk.IsLicensed() {
+		return
+	}
+
+	// Add font, if needed.
+	fontName := core.PdfObjectName("UF1")
+	if !p.Resources.HasFontByName(fontName) {
+		p.Resources.SetFontByName(fontName, DefaultFont().ToPdfObject())
+	}
+
+	var ops []string
+	ops = append(ops, "q")
+	ops = append(ops, "BT")
+	ops = append(ops, fmt.Sprintf("/%s 14 Tf", fontName.String()))
+	ops = append(ops, "1 0 0 rg")
+	ops = append(ops, "10 10 Td")
+	s := "Unlicensed UniDoc - Get a license on https://unidoc.io"
+	ops = append(ops, fmt.Sprintf("(%s) Tj", s))
+	ops = append(ops, "ET")
+	ops = append(ops, "Q")
+	contentstr := strings.Join(ops, "\n")
+
+	p.AddContentStreamByString(contentstr)
+
+	// Update page object.
+	p.ToPdfObject()
 }
 
 // AddOutlineTree adds outlines to a PDF file.
@@ -948,6 +945,12 @@ func (w *PdfWriter) writeBytes(bb []byte) {
 // Write writes out the PDF.
 func (w *PdfWriter) Write(writer io.Writer) error {
 	common.Log.Trace("Write()")
+
+	lk := license.GetLicenseKey()
+	if lk == nil || !lk.IsLicensed() {
+		fmt.Printf("Unlicensed copy of unidoc\n")
+		fmt.Printf("To get rid of the watermark - Please get a license on https://unidoc.io\n")
+	}
 
 	// Outlines.
 	if w.outlineTree != nil {

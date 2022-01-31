@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/negbie/unipdf-agpl/v3/model"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLoadPDFFormData(t *testing.T) {

@@ -219,15 +219,15 @@ func genFieldTextAppearance(wa *model.PdfAnnotationWidget, ftxt *model.PdfFieldT
 		return nil, err
 	}
 	width, height := rect.Width(), rect.Height()
-	bboxWidth, bboxHeight := width, height
 
-	mkDict, has := core.GetDict(wa.MK)
-	if has {
+	var rotation float64
+	if mkDict, has := core.GetDict(wa.MK); has {
 		bsDict, _ := core.GetDict(wa.BS)
 		err := style.applyAppearanceCharacteristics(mkDict, bsDict, nil)
 		if err != nil {
 			return nil, err
 		}
+		rotation, _ = core.GetNumberAsFloat(mkDict.Get("R"))
 	}
 
 	// Get and process the default appearance string (DA) operands.
@@ -252,10 +252,26 @@ func genFieldTextAppearance(wa *model.PdfAnnotationWidget, ftxt *model.PdfFieldT
 	cc.Add_BMC("Tx")
 	cc.Add_q()
 
-	// Apply rotation if present.
-	// Update width and height, as the appearance is generated based on
-	// the bounding of the annotation with no rotation.
-	width, height = style.applyRotation(mkDict, width, height, cc)
+	bboxWidth, bboxHeight := width, height
+	if rotation != 0 {
+		// Calculate bounding box before rotation.
+		revRotation := -rotation
+		bbox := draw.Path{Points: []draw.Point{
+			draw.NewPoint(0, 0).Rotate(revRotation),
+			draw.NewPoint(width, 0).Rotate(revRotation),
+			draw.NewPoint(0, height).Rotate(revRotation),
+			draw.NewPoint(width, height).Rotate(revRotation),
+		}}.GetBoundingBox()
+
+		// Update width and height, as the appearance is generated based on
+		// the bounding of the annotation with no rotation.
+		width = bbox.Width
+		height = bbox.Height
+
+		// Apply rotation.
+		cc.RotateDeg(rotation)
+		cc.Translate(bbox.X, bbox.Y)
+	}
 
 	// Graphic state changes.
 	cc.Add_BT()
@@ -497,10 +513,8 @@ func genFieldTextCombAppearance(wa *model.PdfAnnotationWidget, ftxt *model.PdfFi
 		return nil, err
 	}
 	width, height := rect.Width(), rect.Height()
-	bboxWidth, bboxHeight := width, height
 
-	mkDict, has := core.GetDict(wa.MK)
-	if has {
+	if mkDict, has := core.GetDict(wa.MK); has {
 		bsDict, _ := core.GetDict(wa.BS)
 		err := style.applyAppearanceCharacteristics(mkDict, bsDict, nil)
 		if err != nil {
@@ -536,11 +550,6 @@ func genFieldTextCombAppearance(wa *model.PdfAnnotationWidget, ftxt *model.PdfFi
 	}
 	cc.Add_BMC("Tx")
 	cc.Add_q()
-
-	// Apply rotation if present.
-	// Update width and height, as the appearance is generated based on
-	// the bounding of the annotation with no rotation.
-	width, height = style.applyRotation(mkDict, width, height, cc)
 
 	// Graphic state changes.
 	cc.Add_BT()
@@ -671,7 +680,7 @@ func genFieldTextCombAppearance(wa *model.PdfAnnotationWidget, ftxt *model.PdfFi
 
 	xform := model.NewXObjectForm()
 	xform.Resources = resources
-	xform.BBox = core.MakeArrayFromFloats([]float64{0, 0, bboxWidth, bboxHeight})
+	xform.BBox = core.MakeArrayFromFloats([]float64{0, 0, width, height})
 	xform.SetContentStream(cc.Bytes(), defStreamEncoder())
 
 	apDict := core.MakeDict()
@@ -693,7 +702,6 @@ func genFieldCheckboxAppearance(wa *model.PdfAnnotationWidget, fbtn *model.PdfFi
 		return nil, err
 	}
 	width, height := rect.Width(), rect.Height()
-	bboxWidth, bboxHeight := width, height
 
 	common.Log.Debug("Checkbox, wa BS: %v", wa.BS)
 
@@ -702,8 +710,7 @@ func genFieldCheckboxAppearance(wa *model.PdfAnnotationWidget, fbtn *model.PdfFi
 		return nil, err
 	}
 
-	mkDict, has := core.GetDict(wa.MK)
-	if has {
+	if mkDict, has := core.GetDict(wa.MK); has {
 		bsDict, _ := core.GetDict(wa.BS)
 		err := style.applyAppearanceCharacteristics(mkDict, bsDict, zapfdb)
 		if err != nil {
@@ -724,11 +731,6 @@ func genFieldCheckboxAppearance(wa *model.PdfAnnotationWidget, fbtn *model.PdfFi
 			style2.BorderSize = 0.2
 			drawAlignmentReticle(cc, style2, width, height)
 		}
-
-		// Apply rotation if present.
-		// Update width and height, as the appearance is generated based on
-		// the bounding of the annotation with no rotation.
-		width, height = style.applyRotation(mkDict, width, height, cc)
 
 		fontsize := style.AutoFontSizeFraction * height
 
@@ -765,7 +767,7 @@ func genFieldCheckboxAppearance(wa *model.PdfAnnotationWidget, fbtn *model.PdfFi
 
 		xformOn.Resources = model.NewPdfPageResources()
 		xformOn.Resources.SetFontByName("ZaDb", zapfdb.ToPdfObject())
-		xformOn.BBox = core.MakeArrayFromFloats([]float64{0, 0, bboxWidth, bboxHeight})
+		xformOn.BBox = core.MakeArrayFromFloats([]float64{0, 0, width, height})
 		xformOn.SetContentStream(cc.Bytes(), defStreamEncoder())
 	}
 
@@ -775,7 +777,7 @@ func genFieldCheckboxAppearance(wa *model.PdfAnnotationWidget, fbtn *model.PdfFi
 		if style.BorderSize > 0 {
 			drawRect(cc, style, width, height)
 		}
-		xformOff.BBox = core.MakeArrayFromFloats([]float64{0, 0, bboxWidth, bboxHeight})
+		xformOff.BBox = core.MakeArrayFromFloats([]float64{0, 0, width, height})
 		xformOff.SetContentStream(cc.Bytes(), defStreamEncoder())
 	}
 
@@ -811,8 +813,7 @@ func genFieldComboboxAppearance(form *model.PdfAcroForm, wa *model.PdfAnnotation
 		return nil, err
 	}
 
-	mkDict, has := core.GetDict(wa.MK)
-	if has {
+	if mkDict, has := core.GetDict(wa.MK); has {
 		bsDict, _ := core.GetDict(wa.BS)
 		err := style.applyAppearanceCharacteristics(mkDict, bsDict, nil)
 		if err != nil {
@@ -838,7 +839,7 @@ func genFieldComboboxAppearance(form *model.PdfAcroForm, wa *model.PdfAnnotation
 		}
 
 		if len(optstr) > 0 {
-			xform, err := makeComboboxTextXObjForm(fch.PdfField, width, height, optstr, style, daOps, form.DR, mkDict)
+			xform, err := makeComboboxTextXObjForm(fch.PdfField, width, height, optstr, style, daOps, form.DR)
 			if err != nil {
 				return nil, err
 			}
@@ -856,9 +857,8 @@ func genFieldComboboxAppearance(form *model.PdfAcroForm, wa *model.PdfAnnotation
 // Make a text-based XObj Form.
 func makeComboboxTextXObjForm(field *model.PdfField, width, height float64,
 	text string, style AppearanceStyle, daOps *contentstream.ContentStreamOperations,
-	dr *model.PdfPageResources, mkDict *core.PdfObjectDictionary) (*model.XObjectForm, error) {
+	dr *model.PdfPageResources) (*model.XObjectForm, error) {
 	resources := model.NewPdfPageResources()
-	bboxWidth, bboxHeight := width, height
 
 	cc := contentstream.NewContentCreator()
 	if style.BorderSize > 0 {
@@ -874,11 +874,6 @@ func makeComboboxTextXObjForm(field *model.PdfField, width, height float64,
 	cc.Add_q()
 	// Graphic state changes.
 	cc.Add_BT()
-
-	// Apply rotation if present.
-	// Update width and height, as the appearance is generated based on
-	// the bounding of the annotation with no rotation.
-	width, height = style.applyRotation(mkDict, width, height, cc)
 
 	// Process DA operands.
 	apFont, hasTf, err := style.processDA(field, daOps, dr, resources, cc)
@@ -955,7 +950,7 @@ func makeComboboxTextXObjForm(field *model.PdfField, width, height float64,
 
 	xform := model.NewXObjectForm()
 	xform.Resources = resources
-	xform.BBox = core.MakeArrayFromFloats([]float64{0, 0, bboxWidth, bboxHeight})
+	xform.BBox = core.MakeArrayFromFloats([]float64{0, 0, width, height})
 	xform.SetContentStream(cc.Bytes(), defStreamEncoder())
 
 	return xform, nil
@@ -1070,40 +1065,6 @@ func (style *AppearanceStyle) applyAppearanceCharacteristics(mkDict *core.PdfObj
 	}
 
 	return nil
-}
-
-// applyRotation applies the rotation specified by the MK dictionary,
-// if present. The method returns the width and height of the annotation
-// rectangle with no rotation.
-func (style *AppearanceStyle) applyRotation(mkDict *core.PdfObjectDictionary,
-	width, height float64, cc *contentstream.ContentCreator) (float64, float64) {
-	if !style.AllowMK {
-		return width, height
-	}
-	if mkDict == nil {
-		return width, height
-	}
-
-	// Extract rotation from the MK dictionary.
-	rotation, _ := core.GetNumberAsFloat(mkDict.Get("R"))
-	if rotation == 0 {
-		return width, height
-	}
-
-	// Calculate bounding box before rotation.
-	revRotation := -rotation
-	bbox := draw.Path{Points: []draw.Point{
-		draw.NewPoint(0, 0).Rotate(revRotation),
-		draw.NewPoint(width, 0).Rotate(revRotation),
-		draw.NewPoint(0, height).Rotate(revRotation),
-		draw.NewPoint(width, height).Rotate(revRotation),
-	}}.GetBoundingBox()
-
-	// Apply rotation.
-	cc.RotateDeg(rotation)
-	cc.Translate(bbox.X, bbox.Y)
-
-	return bbox.Width, bbox.Height
 }
 
 // processDA adds the operands found in the field default appearance stream to

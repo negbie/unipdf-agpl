@@ -103,31 +103,31 @@ type PdfAnnotationLink struct {
 }
 
 // GetAction returns the PDF action for the annotation link.
-func (link *PdfAnnotationLink) GetAction() (*PdfAction, error) {
-	if link.action != nil {
-		return link.action, nil
+func (a *PdfAnnotationLink) GetAction() (*PdfAction, error) {
+	if a.action != nil {
+		return a.action, nil
 	}
-	if link.A == nil {
+	if a.A == nil {
 		return nil, nil
 	}
-	if link.reader == nil {
+	if a.reader == nil {
 		return nil, nil
 	}
 
-	action, err := link.reader.loadAction(link.A)
+	action, err := a.reader.loadAction(a.A)
 	if err != nil {
 		return nil, err
 	}
-	link.action = action
+	a.action = action
 
-	return link.action, nil
+	return a.action, nil
 }
 
 // SetAction sets the PDF action for the annotation link.
-func (link *PdfAnnotationLink) SetAction(action *PdfAction) {
-	link.action = action
+func (a *PdfAnnotationLink) SetAction(action *PdfAction) {
+	a.action = action
 	if action == nil {
-		link.A = nil
+		a.A = nil
 	}
 }
 

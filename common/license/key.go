@@ -7,4 +7,3 @@ package license
 
 type LicenseKey struct {
 }
-

@@ -7,6 +7,7 @@ package model
 
 import (
 	"fmt"
+
 	"github.com/negbie/unipdf-agpl/v3/common"
 	"github.com/negbie/unipdf-agpl/v3/core"
 )

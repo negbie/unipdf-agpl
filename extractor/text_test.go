@@ -19,10 +19,10 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/negbie/unipdf-agpl/v3/common"
 	"github.com/negbie/unipdf-agpl/v3/creator"
+	"github.com/negbie/unipdf-agpl/v3/internal/transform"
 	"github.com/negbie/unipdf-agpl/v3/model"
 	"golang.org/x/text/unicode/norm"
 )
@@ -41,9 +41,8 @@ const (
 var (
 	// forceTest should be set to true to force running all tests.
 	// NOTE: Setting environment variable UNIDOC_EXTRACT_FORCETEST = 1 sets this to true.
-	forceTest       = os.Getenv("UNIDOC_EXTRACT_FORCETEST") == "1"
-	corpusFolder    = os.Getenv("UNIDOC_EXTRACT_TESTDATA")
-	referenceFolder = filepath.Join(corpusFolder, "reference")
+	forceTest    = os.Getenv("UNIDOC_EXTRACT_FORCETEST") == "1"
+	corpusFolder = os.Getenv("UNIDOC_EXTRACT_TESTDATA")
 )
 
 // doStress is set to true to run stress tests with the -extractor-stresstest command line option.
@@ -52,9 +51,6 @@ var doStress bool
 func init() {
 	flag.BoolVar(&doStress, "extractor-stresstest", false, "Run text extractor stress tests.")
 	common.SetLogger(common.NewConsoleLogger(common.LogLevelInfo))
-	common.Log.Info("      forceTest=%t", forceTest)
-	common.Log.Info("   corpusFolder=%q", corpusFolder)
-	common.Log.Info("referenceFolder=%q", referenceFolder)
 	isTesting = true
 }
 
@@ -71,7 +67,7 @@ func TestTextExtractionFragments(t *testing.T) {
         BT
         /UniDocCourier 24 Tf
         (Hello World!)Tj
-        0 -25 Td
+        0 -10 Td
         (Doink)Tj
         ET
         `,
@@ -80,27 +76,27 @@ func TestTextExtractionFragments(t *testing.T) {
 		{
 			name: "landscape",
 			contents: `
-		BT
-		/UniDocCourier 24 Tf
-		0 1 -1 0 0 0 Tm
-		(Hello World!)Tj
-		0 -25 Td
-		(Doink)Tj
-		ET
-		`,
+        BT
+        /UniDocCourier 24 Tf
+        0 1 -1 0 0 0 Tm
+        (Hello World!)Tj
+        0 -10 Td
+        (Doink)Tj
+        ET
+        `,
 			text: "Hello World!\nDoink",
 		},
 		{
 			name: "180 degree rotation",
 			contents: `
-		BT
-		/UniDocCourier 24 Tf
-		-1 0 0 -1 0 0 Tm
-		(Hello World!)Tj
-		0 -25 Td
-		(Doink)Tj
-		ET
-		`,
+        BT
+        /UniDocCourier 24 Tf
+        -1 0 0 -1 0 0 Tm
+        (Hello World!)Tj
+        0 -10 Td
+        (Doink)Tj
+        ET
+        `,
 			text: "Hello World!\nDoink",
 		},
 		{
@@ -108,9 +104,9 @@ func TestTextExtractionFragments(t *testing.T) {
 			contents: `
         BT
         /UniDocHelvetica 24 Tf
-
+        0 -1 1 0 0 0 Tm
         (Hello World!)Tj
-        0 -25 Td
+        0 -10 Td
         (Doink)Tj
         ET
         `,
@@ -129,13 +125,12 @@ func TestTextExtractionFragments(t *testing.T) {
 
 	for _, f := range fragmentTests {
 		t.Run(f.name, func(t *testing.T) {
-			e := Extractor{resources: resources, contents: f.contents, mediaBox: r(-200, -200, 600, 800)}
+			e := Extractor{resources: resources, contents: f.contents}
 			text, err := e.ExtractText()
 			if err != nil {
 				t.Fatalf("Error extracting text: %q err=%v", f.name, err)
 				return
 			}
-			text = strings.TrimRight(text, "\n")
 			if text != f.text {
 				t.Fatalf("Text mismatch: %q Got %q. Expected %q", f.name, text, f.text)
 				return
@@ -153,8 +148,7 @@ func TestTextExtractionFiles(t *testing.T) {
 		return
 	}
 	for _, test := range fileExtractionTests {
-		// TODO(peterwilliams97): Remove non-lazy test.
-		// testExtractFileOptions(t, test.filename, test.pageTerms, false)
+		testExtractFileOptions(t, test.filename, test.pageTerms, false)
 		testExtractFileOptions(t, test.filename, test.pageTerms, true)
 	}
 }
@@ -177,7 +171,7 @@ func TestTermMarksFiles(t *testing.T) {
 	if !doStress {
 		t.Skip("skipping stress test")
 	}
-	common.Log.Info("Running text stress tests.")
+	common.Log.Info("Running text stress tests. go test --short to skip these.")
 	if len(corpusFolder) == 0 && !forceTest {
 		t.Log("Corpus folder not set - skipping")
 		return
@@ -185,15 +179,50 @@ func TestTermMarksFiles(t *testing.T) {
 	testTermMarksFiles(t)
 }
 
-// TestTextExtractionReference compares the text extracted from pages of PDF files to reference text
-// files.
-func TestTextExtractionReference(t *testing.T) {
-	if len(corpusFolder) == 0 && !forceTest {
-		t.Log("Corpus folder not set - skipping")
-		return
+//  TestTextSort checks that PageText.sortPosition() gives expected results
+func TestTextSort(t *testing.T) {
+	// marks0 is in the expected sort order for tol=15
+	marks0 := []textMark{
+		// y difference > tol => sorts by Y descending
+		textMark{orientedStart: transform.Point{X: 300, Y: 160}, text: "00"},
+		textMark{orientedStart: transform.Point{X: 200, Y: 140}, text: "01"},
+		textMark{orientedStart: transform.Point{X: 100, Y: 120}, text: "02"},
+
+		// y difference < tol => sort by X ascending for approx same Y
+		textMark{orientedStart: transform.Point{X: 100, Y: 30}, text: "10"},
+		textMark{orientedStart: transform.Point{X: 200, Y: 40}, text: "11"},
+		textMark{orientedStart: transform.Point{X: 300, Y: 50}, text: "12"},
+
+		// y difference < tol => sorts by X descending for approx same Y, different from previous Y
+		textMark{orientedStart: transform.Point{X: 100, Y: 3}, text: "20"},
+		textMark{orientedStart: transform.Point{X: 200, Y: 4}, text: "21"},
+		textMark{orientedStart: transform.Point{X: 300, Y: 5}, text: "22"},
 	}
-	for _, er := range extractReferenceTests {
-		er.runTextTest(t)
+
+	// marks is a copy of marks0 with its order scrambled.
+	marks := make([]textMark, len(marks0))
+	copy(marks, marks0)
+	sort.Slice(marks, func(i, j int) bool {
+		ti, tj := marks[i], marks[j]
+		if ti.orientedStart.X != tj.orientedStart.X {
+			return ti.orientedStart.X > tj.orientedStart.X
+		}
+		if ti.orient != tj.orient {
+			return ti.orient > tj.orient
+		}
+		return ti.orientedStart.Y < tj.orientedStart.Y
+	})
+
+	// Copy marks to PageText and sort them. This should give the same order as marks0.
+	pt := PageText{marks: marks}
+	pt.sortPosition(15)
+
+	// Check that marks order is the same as marks0.
+	for i, m0 := range marks0 {
+		m := pt.marks[i]
+		if m.orientedStart.X != m0.orientedStart.X || m.orientedStart.Y != m0.orientedStart.Y {
+			t.Fatalf("i=%d m=%v != m0=%v", i, m, m0)
+		}
 	}
 }
 
@@ -207,7 +236,7 @@ var fileExtractionTests = []struct {
 }{
 	{filename: "reader.pdf",
 		pageTerms: map[int][]string{
-			1: {"A Research UNIX Reader:",
+			1: []string{"A Research UNIX Reader:",
 				"Annotated Excerpts from the Programmer’s Manual,",
 				"1. Introduction",
 				"To keep the size of this report",
@@ -217,96 +246,108 @@ var fileExtractionTests = []struct {
 	},
 	{filename: "000026.pdf",
 		pageTerms: map[int][]string{
-			1: {"Fresh Flower",
-				"Care & Handling",
+			1: []string{"Fresh Flower",
+				"Care & Handling ",
 			},
 		},
 	},
 	{filename: "search_sim_key.pdf",
 		pageTerms: map[int][]string{
-			2: {"A cryptographic scheme which enables searching",
+			2: []string{"A cryptographic scheme which enables searching",
 				"Untrusted server should not be able to search for a word without authorization",
 			},
 		},
 	},
-	{filename: "Theil_inequality.pdf", // 270° rotated file.
+	{filename: "Theil_inequality.pdf",
 		pageTerms: map[int][]string{
-			1: {"London School of Economics and Political Science"},
-			4: {"The purpose of this paper is to set Theil’s approach"},
+			1: []string{"London School of Economics and Political Science"},
+			4: []string{"The purpose of this paper is to set Theil’s approach"},
 		},
 	},
 	{filename: "8207.pdf",
 		pageTerms: map[int][]string{
-			1: {"In building graphic systems for use with raster devices,"},
-			2: {"The imaging model specifies how geometric shapes and colors are"},
-			3: {"The transformation matrix T that maps application defined"},
+			1: []string{"In building graphic systems for use with raster devices,"},
+			2: []string{"The imaging model specifies how geometric shapes and colors are"},
+			3: []string{"The transformation matrix T that maps application defined"},
 		},
 	},
 	{filename: "ling-2013-0040ad.pdf",
 		pageTerms: map[int][]string{
-			1: {"Although the linguistic variation among texts is continuous"},
-			2: {"distinctions. For example, much of the research on spoken/written"},
+			1: []string{"Although the linguistic variation among texts is continuous"},
+			2: []string{"distinctions. For example, much of the research on spoken/written"},
 		},
 	},
 	{filename: "26-Hazard-Thermal-environment.pdf",
 		pageTerms: map[int][]string{
-			1: {"OHS Body of Knowledge"},
-			2: {"Copyright notice and licence terms"},
+			1: []string{"OHS Body of Knowledge"},
+			2: []string{"Copyright notice and licence terms"},
 		},
 	},
 	{filename: "Threshold_survey.pdf",
 		pageTerms: map[int][]string{
-			1: {"clustering, entropy, object attributes, spatial correlation, and local"},
+			1: []string{"clustering, entropy, object attributes, spatial correlation, and local"},
 		},
 	},
 	{filename: "circ2.pdf",
 		pageTerms: map[int][]string{
-			1: {"Understanding and complying with copyright law can be a challenge"},
+			1: []string{"Understanding and complying with copyright law can be a challenge"},
 		},
 	},
 	{filename: "rare_word.pdf",
 		pageTerms: map[int][]string{
-			6: {"words in the test set, we increase the BLEU score"},
+			6: []string{"words in the test set, we increase the BLEU score"},
 		},
 	},
 	{filename: "Planck_Wien.pdf",
 		pageTerms: map[int][]string{
-			1: {"entropy of a system of n identical resonators in a stationary radiation field"},
+			1: []string{"entropy of a system of n identical resonators in a stationary radiation field"},
 		},
 	},
+	// Case where combineDiacritics was combining ' and " with preceeding letters.
+	// NOTE(peterwilliams97): Part of the reason this test fails is that we don't currently read
+	// Type0:CIDFontType0 font metrics and assume zero displacemet so that we place the ' and " too
+	// close to the preceeding letters.
 	{filename: "/rfc6962.txt.pdf",
 		pageTerms: map[int][]string{
-			4: {"timestamps for certificates they then don’t log",
+			4: []string{
+				"timestamps for certificates they then don’t log",
 				`The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD",`},
 		},
 	},
 	{filename: "Saudi.pdf",
 		pageTerms: map[int][]string{
-			10: {"الله"},
+			10: []string{"الله"},
 		},
 	},
-	{filename: "Ito_Formula.pdf", // 90° rotated with diacritics in different textMarks to base.
-		pageTerms: map[int][]string{
-			1: {"In the Itô stochastic calculus",
-				"In standard, non-stochastic calculus, one computes a derivative"},
-			2: {"Financial Economics Itô’s Formula"},
-		},
-	},
-	{filename: "thanh.pdf", // Diacritics in different textMarks to base.
-		pageTerms: map[int][]string{
-			1: {"Hàn Thế Thành"},
-			6: {"Petr Olšák"},
-		},
-	},
+	// TODO(peterwilliams97): Reinstate these 2 tests when diacritic combination is fixed.
+	// {filename: "Ito_Formula.pdf",
+	// 	pageTerms: map[int][]string{
+	// 		1: []string{
+	// 			"In the Itô stochastic calculus",
+	// 			"In standard, non-stochastic calculus, one computes a derivative"},
+	// 		2: []string{"Financial Economics Itô’s Formula"},
+	// 	},
+	// },
+	// {filename: "thanh.pdf",
+	// 	pageTerms: map[int][]string{
+	// 		1: []string{"Hàn Thé̂ Thành"},
+	// 	},
+	// },
 }
 
 // testExtractFile tests the ExtractTextWithStats text extractor on `filename` and compares the
 // extracted text to `pageTerms`. If `lazy` is true, the PDF is lazily loaded.
 func testExtractFileOptions(t *testing.T, filename string, pageTerms map[int][]string, lazy bool) {
-	filepath, exists := corpusFilepath(t, filename)
-	if !forceTest && !exists {
+	filepath := filepath.Join(corpusFolder, filename)
+	exists := checkFileExists(filepath)
+	if !exists {
+		if forceTest {
+			t.Fatalf("filepath=%q does not exist", filepath)
+		}
+		t.Logf("%s not found", filepath)
 		return
 	}
+
 	_, actualPageText := extractPageTexts(t, filepath, lazy)
 	for _, pageNum := range sortedKeys(pageTerms) {
 		expectedTerms, ok := pageTerms[pageNum]
@@ -338,8 +379,9 @@ func extractPageTexts(t *testing.T, filename string, lazy bool) (int, map[int]st
 	if err != nil {
 		t.Fatalf("GetNumPages failed. filename=%q err=%v", filename, err)
 	}
-	pageText := make(map[int]string)
+	pageText := map[int]string{}
 	for pageNum := 1; pageNum <= numPages; pageNum++ {
+
 		page, err := pdfReader.GetPage(pageNum)
 		if err != nil {
 			t.Fatalf("GetPage failed. filename=%q page=%d err=%v", filename, pageNum, err)
@@ -353,6 +395,7 @@ func extractPageTexts(t *testing.T, filename string, lazy bool) (int, map[int]st
 		if err != nil {
 			t.Fatalf("ExtractTextWithStats failed. filename=%q page=%d err=%v", filename, pageNum, err)
 		}
+		// TODO(peterwilliams97): Improve text extraction space insertion so we don't need reduceSpaces.
 		pageText[pageNum] = reduceSpaces(text)
 	}
 	return numPages, pageText
@@ -400,11 +443,11 @@ func (c pageContents) matchTerms() []string {
 
 // textLocTests are the extracted text location tests. All coordinates are multiples of 0.5 points.
 var textLocTests = []textLocTest{
-	{
+	textLocTest{
 		filename: "prop-price-list-2017.pdf",
 		numPages: 1,
 		contents: map[int]pageContents{
-			1: {
+			1: pageContents{
 				terms: []string{
 					"PRICE LIST",
 					"THING ONE", "$99",
@@ -418,6 +461,7 @@ var textLocTests = []textLocTest{
 					l(2, "I", 231.9, 725.2, 245.2, 773.2),
 					l(3, "C", 245.2, 725.2, 279.9, 773.2),
 					l(4, "E", 279.9, 725.2, 312.0, 773.2),
+					l(5, " ", 312.0, 725.2, 325.3, 773.2),
 					l(6, "L", 325.3, 725.2, 354.6, 773.2),
 					l(7, "I", 354.6, 725.2, 368.0, 773.2),
 					l(8, "S", 368.0, 725.2, 400.0, 773.2),
@@ -429,11 +473,11 @@ var textLocTests = []textLocTest{
 			},
 		},
 	},
-	{
+	textLocTest{
 		filename: "pol_e.pdf",
 		numPages: 2,
 		contents: map[int]pageContents{
-			1: {
+			1: pageContents{
 				marks: []TextMark{
 					l(3914, "W", 177.0, 136.5, 188.0, 148.0),
 					l(3915, "T", 187.5, 136.5, 194.5, 148.0),
@@ -446,25 +490,24 @@ var textLocTests = []textLocTest{
 			},
 		},
 	},
-	{
+	textLocTest{
 		filename: "thanh.pdf",
 		numPages: 6,
 		contents: map[int]pageContents{
-			1: {
+			1: pageContents{
 				terms: []string{
 					"result is a set of Type 1 fonts that is similar to the Blue Sky fonts",
 					"provide Vietnamese letters with the same quality of outlines and hints",
 					"Vietnamese letters and VNR fonts",
-					"Vietnamese accents can be divided into",
-					"kinds of diacritic marks: tone, vowel and consonant.",
-					"about 2 years until the first version was released",
+					"Vietnamese accents can be divided into three the Czech and Polish version of CMR fonts",
+					"kinds of diacritic marks: tone, vowel and consonant. about 2 years until the ﬁrst version",
 				},
 				termBBox: map[string]model.PdfRectangle{
 					"the Blue Sky fonts":                       r(358.0, 532.5, 439.0, 542.5),
 					"Vietnamese letters with the same quality": r(165.5, 520.5, 344.5, 530.5),
 				},
 			},
-			2: {
+			2: pageContents{
 				terms: []string{
 					"number of glyphs needed for each font is 47",
 					"which 22 are Vietnamese accents and letters.",
@@ -486,13 +529,13 @@ var textLocTests = []textLocTest{
 			},
 		},
 	},
-	{
+	textLocTest{
 		filename: "unicodeexample.pdf",
 		numPages: 6,
 		contents: map[int]pageContents{
-			2: {
+			2: pageContents{
 				terms: []string{
-					"Österreich", "Johann Strauss",
+					"Österreich", "Johann Strauß",
 					"Azərbaycan", "Vaqif Səmədoğlu",
 					"Азәрбајҹан", "Вагиф Сәмәдоғлу",
 				},
@@ -516,21 +559,21 @@ var textLocTests = []textLocTest{
 			},
 		},
 	},
-	{
+	textLocTest{
 		filename: "AF+handout+scanned.pdf",
 		numPages: 3,
 		contents: map[int]pageContents{
-			1: {
+			1: pageContents{
 				termBBox: map[string]model.PdfRectangle{
 					"reserved": r(505.0, 488.5, 538.5, 497.0),
 				},
 			},
-			2: {
+			2: pageContents{
 				termBBox: map[string]model.PdfRectangle{
 					"atrium": r(452.78, 407.76, 503.78, 416.26),
 				},
 			},
-			3: {
+			3: pageContents{
 				termBBox: map[string]model.PdfRectangle{
 					"treatment": r(348.0, 302.0, 388.0, 311.5),
 				},
@@ -546,7 +589,6 @@ func (e textLocTest) testDocTextAndMarks(t *testing.T, lazy bool) {
 	common.Log.Debug("textLocTest.testDocTextAndMarks: %s", desc)
 
 	filename := filepath.Join(corpusFolder, e.filename)
-	common.Log.Debug("testDocTextAndMarks: %q", filename)
 	f, err := os.Open(filename)
 	if err != nil {
 		t.Fatalf("Couldn't open filename=%q err=%v", filename, err)
@@ -585,8 +627,6 @@ func (c pageContents) testPageTextAndMarks(t *testing.T, l *markupList, desc str
 	page *model.PdfPage) {
 	text, textMarks := pageTextAndMarks(t, desc, page)
 
-	common.Log.Debug("testPageTextAndMarks ===================")
-	common.Log.Debug("text====================\n%s\n======================", text)
 	// 1) Check that all expected terms are found in `text`.
 	for i, term := range c.terms {
 		common.Log.Debug("%d: %q", i, term)
@@ -595,14 +635,12 @@ func (c pageContents) testPageTextAndMarks(t *testing.T, l *markupList, desc str
 		}
 	}
 
-	// XXX(peterwilliams97): The new text extraction changes TextMark contents. From now on we
-	// only test their behaviour, not their implementation.
-	// // 2) Check that all expected TextMarks are in `textMarks`.
-	// offsetMark := marksMap(textMarks)
-	// for i, tm := range c.marks {
-	// 	common.Log.Debug("%d: %v", i, tm)
-	// 	checkContains(t, desc, offsetMark, tm)
-	// }
+	// 2) Check that all expected TextMarks are in `textMarks`.
+	offsetMark := marksMap(textMarks)
+	for i, tm := range c.marks {
+		common.Log.Debug("%d: %v", i, tm)
+		checkContains(t, desc, offsetMark, tm)
+	}
 
 	// 3) Check that locationsIndex() finds TextMarks in `textMarks` corresponding to some
 	//   substrings of `text`.
@@ -647,12 +685,10 @@ func testTermMarksFiles(t *testing.T) {
 		t.Fatalf("Glob(%q) failed. err=%v", pattern, err)
 	}
 	for i, filename := range pathList {
-		// 4865ab395ed664c3ee17.pdf is a corrupted file in the test corpus.
-		if strings.Contains(filename, "4865ab395ed664c3ee17.pdf") {
-			continue
+		for _, lazy := range []bool{false, true} {
+			common.Log.Info("%4d of %d: %q lazy=%t", i+1, len(pathList), filename, lazy)
+			tryTestTermMarksFile(t, filename, lazy)
 		}
-		common.Log.Info("%4d of %d: %q", i+1, len(pathList), filename)
-		tryTestTermMarksFile(t, filename, true)
 	}
 }
 
@@ -690,126 +726,10 @@ func tryTestTermMarksFile(t *testing.T, filename string, lazy bool) {
 	}
 }
 
-// extractReferenceTests compare text extracted from a page of a PDF file to a reference text file.
-var extractReferenceTests = []extractReference{
-	{"ChapterK.pdf", 1},
-	{"Garnaut.pdf", 1},
-	{"rise.pdf", 2},
-	{"pioneer.pdf", 1},
-	{"women.pdf", 20},
-	{"status.pdf", 2},
-	{"recognition.pdf", 1},
-	{"eu.pdf", 5},
-	{"we-dms.pdf", 1},
-	{"Productivity.pdf", 1},
-	{"Nuance.pdf", 1},
-}
-
-// extractReference describes a PDF file and page number.
-type extractReference struct {
-	filename string
-	pageNum  int
-}
-
-// runTextTest runs the test described by `er`. It checks that the text extracted from the page of the
-// PDF matches the reference text file.
-func (er extractReference) runTextTest(t *testing.T) {
-	compareExtractedTextToReference(t, er.pdfPath(), er.pageNum, er.textPath())
-}
-
-// runTextTest runs the test described by `er`. It checks that the text extracted from the page of the
-// PDF matches the reference text file.
-func (er extractReference) runTableTest(t *testing.T) {
-	csvPaths, err := er.tablePaths()
-	if err != nil {
-		t.Fatalf("tablePaths: err=%v", err)
-	}
-	if len(csvPaths) == 0 {
-		t.Fatalf("tablePaths: No csv paths")
-	}
-	common.Log.Notice("runTableTest: %q pageNum=%d csvPaths=%d:%q",
-		er.pdfPath(), er.pageNum, len(csvPaths), csvPaths)
-
-	compareExtractedTablesToReference(t, er.pdfPath(), er.pageNum, csvPaths)
-}
-
-// pdfPath returns the path of the PDF file for test `er`.
-func (er extractReference) pdfPath() string {
-	return filepath.Join(corpusFolder, er.filename)
-}
-
-// textPath returns the path of the text reference file for test `er`.
-func (er extractReference) textPath() string {
-	pageStr := fmt.Sprintf("page%03d", er.pageNum)
-	return changeDirExt(referenceFolder, er.filename, pageStr, ".txt")
-}
-
-// COVID-19.page4.table1.csv
-func (er extractReference) tablePaths() ([]string, error) {
-	pageStr := fmt.Sprintf("page%03d.table*", er.pageNum)
-	pattern := changeDirExt(referenceFolder, er.filename, pageStr, ".csv")
-	paths, err := filepath.Glob(pattern)
-	common.Log.Notice("Glob(%q)=%d %q", pattern, len(paths), paths)
-	return paths, err
-}
-
-// compareExtractedTextToReference extracts text from (1-offset) page `pageNum` of PDF `filename`
-// and checks that it matches the text in reference file `textPath`.
-func compareExtractedTextToReference(t *testing.T, filename string, pageNum int, textPath string) {
-	f, err := os.Open(filename)
-	if err != nil {
-		common.Log.Info("Couldn't open. skipping. filename=%q err=%v", filename, err)
-		return
-	}
-	defer f.Close()
-	pdfReader, err := openPdfReader(f, true)
-	if err != nil {
-		common.Log.Info("openPdfReader failed. skipping. filename=%q err=%v", filename, err)
-		return
-	}
-	expectedText, err := readTextFile(textPath)
-	if err != nil {
-		common.Log.Info("readTextFile failed. skipping. textPath=%q err=%v", textPath, err)
-		return
-	}
-
-	desc := fmt.Sprintf("filename=%q pageNum=%d", filename, pageNum)
-	page, err := pdfReader.GetPage(pageNum)
-	if err != nil {
-		common.Log.Info("GetPage failed. skipping. %s err=%v", desc, err)
-		return
-	}
-	actualText, _ := pageTextAndMarks(t, desc, page)
-
-	actualText = normalize(actualText)
-	expectedText = normalize(expectedText)
-	if actualText != expectedText {
-		common.Log.Info("actual   ===================== %d\n%s\n=====================", len(actualText), actualText)
-		common.Log.Info("expected ===================== %d\n%s\n=====================", len(expectedText), expectedText)
-		at := []rune(actualText)
-		et := []rune(expectedText)
-		n := minInt(len(at), len(et))
-		i0 := -1
-		for i := 0; i < n; i++ {
-			if at[i] != et[i] {
-				i0 = i
-				break
-			}
-		}
-		common.Log.Info("i0=%d", i0)
-		i1 := minInt(i0+10, n)
-		i0 = maxInt(i0-10, 0)
-		for i := i0; i < i1; i++ {
-			fmt.Printf("%4d: %4q %q\n", i, at[i], et[i])
-		}
-		t.Fatalf("Text mismatch filename=%q page=%d", filename, pageNum)
-	}
-}
-
 // testTermMarksMulti checks that textMarks.RangeOffset() finds the TextMarks in `textMarks`
 // corresponding to some substrings of `text` with lengths 1-20.
 func testTermMarksMulti(t *testing.T, text string, textMarks *TextMarkArray) {
-	m := utf8.RuneCountInString(text)
+	m := len([]rune(text))
 	if m > 20 {
 		m = 20
 	}
@@ -825,39 +745,21 @@ func testTermMarks(t *testing.T, text string, textMarks *TextMarkArray, n int) {
 		return
 	}
 	common.Log.Debug("testTermMarks: text=%d n=%d", len(text), n)
-	// We build our substrings out of whole runes, not fragments of utf-8 codes from the text.
+	// We build our substrings out of whole runes, not fragments of utf-8 codes from the text
 	runes := []rune(text)
 	if n > len(runes)/2 {
 		n = len(runes) / 2
 	}
+	runeString := runeStringIndex(text)
 
-	delta := 5
-	for ofs := 0; ofs < len(runes)-2*n; ofs++ {
-		term := string(runes[ofs : ofs+n])
-		ofs0 := len(string(runes[:ofs]))
-		ofs1 := len(string(runes[:ofs+n]))
-		ofs0d := ofs0 - delta
-		ofs1d := ofs1 + delta
-		if ofs0d < 0 {
-			ofs0d = 0
-		}
-		if ofs1d > len(text) {
-			ofs1d = len(text)
-		}
-		show := fmt.Sprintf("<%s|%s|%s>", text[ofs0d:ofs0], text[ofs0:ofs1], text[ofs1:ofs1d])
-		{
-			show = fmt.Sprintf("%q", show)
-			runes := []rune(show)
-			show = string(runes[1 : len(runes)-1])
-		}
+	for ofsRune := 0; ofsRune < len(runes)-n; ofsRune++ {
+		term := string(runes[ofsRune : ofsRune+n])
+		ofs0 := runeString[ofsRune]
+		ofs1 := runeString[ofsRune+n]
 
-		// Get TextMarks spanning `term` with RangeOffset().
+		// Get TextMarks spanned `term` with RangeOffset().
 		spanArray, err := textMarks.RangeOffset(ofs0, ofs1)
 		if err != nil {
-			if n <= 2 {
-				// Could be ligatures
-				continue
-			}
 			t.Fatalf("textMarks.RangeOffset failed term=%q=text[%d:%d]=%02x err=%v",
 				term, ofs0, ofs1, text[ofs0:ofs1], err)
 		}
@@ -870,46 +772,29 @@ func testTermMarks(t *testing.T, text string, textMarks *TextMarkArray, n int) {
 		mark0 := spanMarks[0]
 		mark1 := spanMarks[spanArray.Len()-1]
 
-		if len(mark0.Text) <= len(term) {
-			if !startWith(term, mark0.Text) {
-				for i, tm := range spanMarks {
-					fmt.Printf("%4d: %s\n", i, tm)
-				}
-				t.Fatalf("mark0 is not a prefix for term=%s=text[%d:%d]=%02x mark0=%v",
-					show, ofs0, ofs1, text[ofs0:ofs1], mark0)
-			}
+		if !strings.HasPrefix(term, mark0.Text) {
+			t.Fatalf("mark0 is not a prefix for term=%q=text[%d:%d]=%02x mark0=%v",
+				term, ofs0, ofs1, text[ofs0:ofs1], mark0)
 		}
-		if len(mark1.Text) <= len(term) {
-			if !endsWith(term, mark1.Text) {
-				for i, tm := range spanMarks {
-					fmt.Printf("%4d: %s\n", i, tm)
-				}
-				t.Fatalf("mark1 is not a suffix for term=%s=text[%d:%d]=%v mark1=%v",
-					show, ofs0, ofs1, text[ofs0:ofs1], mark1)
-			}
+		if !strings.HasSuffix(term, mark1.Text) {
+			t.Fatalf("mark1 is not a suffix for term=%q=text[%d:%d]=%v mark1=%v",
+				term, ofs0, ofs1, text[ofs0:ofs1], mark1)
 		}
 	}
 }
 
-// startWith returns true if the start of `str` overlaps the end of `sub`.
-func startWith(str, sub string) bool {
-	for n := 0; n < len(sub); n++ {
-		if strings.HasPrefix(str, sub[n:]) {
-			return true
-		}
-		// common.Log.Error("!startsWith: str=%q sub=%q sub[%d:]=%q", str, sub, n, sub[n:])
+// runeStringIndex returns a map of indexes of `[]rune(text)`` to the corresponding indexes in `text`.
+func runeStringIndex(text string) map[int]int {
+	runeString := map[int]int{}
+	runeIdx := 0
+	for strIdx, _ := range text {
+		runeString[runeIdx] = strIdx
+		runeIdx++
 	}
-	return false
-}
-
-// endsWith returns true if the end of `str` overlaps the start of `sub`.
-func endsWith(str, sub string) bool {
-	for n := len(sub); n >= 1; n-- {
-		if strings.HasSuffix(str, sub[:n]) {
-			return true
-		}
+	if len(runeString) != len([]rune(text)) {
+		panic("d")
 	}
-	return false
+	return runeString
 }
 
 // checkContains checks that `offsetMark` contains `expectedMark`.
@@ -997,7 +882,7 @@ func pageTextAndMarks(t *testing.T, desc string, page *model.PdfPage) (string, *
 	text := pageText.Text()
 	textMarks := pageText.Marks()
 
-	if false { // Some extra debugging to see how the code works. Not needed by test.
+	{ // Some extra debugging to see how the code works. Not needed by test.
 		common.Log.Debug("text=>>>%s<<<\n", text)
 		common.Log.Debug("textMarks=%s %q", textMarks, desc)
 		for i, tm := range textMarks.Elements() {
@@ -1031,16 +916,11 @@ func containsTerms(t *testing.T, terms []string, actualText string) bool {
 	for _, w := range terms {
 		w = norm.NFKC.String(w)
 		if !strings.Contains(actualText, w) {
-			t.Fatalf("No match for %q", w)
+			t.Errorf("No match for %q", w)
 			return false
 		}
 	}
 	return true
-}
-
-// normalize returns a version of `text` that is NFKC normalized and has reduceSpaces() applied.
-func normalize(text string) string {
-	return reduceSpaces(norm.NFKC.String(text))
 }
 
 // reduceSpaces returns `text` with runs of spaces of any kind (spaces, tabs, line breaks, etc)
@@ -1060,7 +940,7 @@ func checkFileExists(filepath string) bool {
 
 // sortedKeys returns the keys of `m` as a sorted slice.
 func sortedKeys(m map[int][]string) []int {
-	keys := make([]int, 0, len(m))
+	keys := []int{}
 	for k := range m {
 		keys = append(keys, k)
 	}
@@ -1167,7 +1047,7 @@ func (l *markupList) saveOutputPdf() {
 		mediaBox, err := page.GetMediaBox()
 		if err == nil && page.MediaBox == nil {
 			// Deal with MediaBox inherited from Parent.
-			common.Log.Info("MediaBox: %v → %v", page.MediaBox, mediaBox)
+			common.Log.Info("MediaBox: %v -> %v", page.MediaBox, mediaBox)
 			page.MediaBox = mediaBox
 		}
 		h := mediaBox.Ury
@@ -1200,48 +1080,4 @@ func (l *markupList) saveOutputPdf() {
 	if err != nil {
 		l.t.Fatalf("WriteFile failed. metaPath=%q err=%v", metaPath, err)
 	}
-}
-
-// changeDirExt inserts `qualifier` into `filename` before its extension then changes its
-// directory to `dirName` and extrension to `extName`,
-func changeDirExt(dirName, filename, qualifier, extName string) string {
-	if dirName == "" {
-		return ""
-	}
-	base := filepath.Base(filename)
-	ext := filepath.Ext(base)
-	base = base[:len(base)-len(ext)]
-	if len(qualifier) > 0 {
-		base = fmt.Sprintf("%s.%s", base, qualifier)
-	}
-	filename = fmt.Sprintf("%s%s", base, extName)
-	path := filepath.Join(dirName, filename)
-	common.Log.Debug("changeDirExt(%q,%q,%q)→%q", dirName, base, extName, path)
-	return path
-}
-
-// readTextFile return the contents of `filename` as a string.
-func readTextFile(filename string) (string, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	b, err := ioutil.ReadAll(f)
-	return string(b), err
-}
-
-// corpusFilepath returns the full path of `filename` in the corpus directory.
-// NOTE: Caller must check the corpus is present of the local computer
-func corpusFilepath(t *testing.T, filename string) (string, bool) {
-	fullpath := filepath.Join(corpusFolder, filename)
-	exists := checkFileExists(fullpath)
-	if !exists {
-		if forceTest {
-			t.Fatalf("filepath=%q does not exist. ", fullpath)
-		} else {
-			t.Logf("filepath=%q does not exist. Skipping test.", fullpath)
-		}
-	}
-	return fullpath, exists
 }

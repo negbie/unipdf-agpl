@@ -7,11 +7,8 @@ package extractor
 
 import (
 	"fmt"
-	"image/color"
 
-	"github.com/negbie/unipdf-agpl/v3/common"
 	"github.com/negbie/unipdf-agpl/v3/core"
-	"github.com/negbie/unipdf-agpl/v3/model"
 )
 
 // RenderMode specifies the text rendering mode (Tmode), which determines whether showing text shall cause
@@ -39,45 +36,26 @@ func toFloatXY(objs []core.PdfObject) (x, y float64, err error) {
 	return floats[0], floats[1], nil
 }
 
+// minFloat returns the lesser of `a` and `b`.
+func minFloat(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// maxFloat returns the greater of `a` and `b`.
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // truncate returns the first `n` characters in string `s`.
 func truncate(s string, n int) string {
 	if len(s) < n {
 		return s
 	}
 	return s[:n]
-}
-
-func truncate2(s string, n int) string {
-	if len(s) < n {
-		return s
-	}
-	n0 := n / 2
-	n1 := n - n0
-	return s[:n0] + " ... " + s[len(s)-n1:]
-}
-
-// pdfColorToGoColor converts the specified color to a Go color, using the
-// provided colorspace. If unsuccessful, color.Black is returned.
-func pdfColorToGoColor(space model.PdfColorspace, c model.PdfColor) color.Color {
-	if space == nil || c == nil {
-		return color.Black
-	}
-
-	conv, err := space.ColorToRGB(c)
-	if err != nil {
-		common.Log.Debug("WARN: could not convert color %v (%v) to RGB: %s", c, space, err)
-		return color.Black
-	}
-	rgb, ok := conv.(*model.PdfColorDeviceRGB)
-	if !ok {
-		common.Log.Debug("WARN: converted color is not in the RGB colorspace: %v", conv)
-		return color.Black
-	}
-
-	return color.NRGBA{
-		R: uint8(rgb.R() * 255),
-		G: uint8(rgb.G() * 255),
-		B: uint8(rgb.B() * 255),
-		A: uint8(255),
-	}
 }

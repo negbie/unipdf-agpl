@@ -101,7 +101,7 @@ func NewPdfColorspaceFromPdfObject(obj core.PdfObject) (PdfColorspace, error) {
 			return NewPdfColorspaceSpecialPattern(), nil
 		default:
 			common.Log.Debug("ERROR: Unknown colorspace %s", *csName)
-			return nil, ErrRange
+			return nil, errRangeError
 		}
 	}
 
@@ -2284,7 +2284,7 @@ func newPdfColorspaceSpecialIndexedFromPdfObject(obj core.PdfObject) (*PdfColors
 	baseName, err := DetermineColorspaceNameFromPdfObject(obj)
 	if baseName == "Indexed" || baseName == "Pattern" {
 		common.Log.Debug("Error: Indexed colorspace cannot have Indexed/Pattern CS as base (%v)", baseName)
-		return nil, ErrRange
+		return nil, errRangeError
 	}
 
 	baseCs, err := NewPdfColorspaceFromPdfObject(obj)
@@ -2401,7 +2401,7 @@ func (cs *PdfColorspaceSpecialIndexed) ImageToRGB(img Image) (Image, error) {
 	baseImage.Width = img.Width
 	baseImage.alphaData = img.alphaData
 	// TODO(peterwilliams97): Add support for other BitsPerComponent values.
-	// See https://github.com/unidoc/unipdf/issues/260
+	// See https://github.com/negbie/unipdf-agpl/issues/260
 	baseImage.BitsPerComponent = 8
 	baseImage.hasAlpha = img.hasAlpha
 	baseImage.ColorComponents = cs.Base.GetNumComponents()

@@ -11,6 +11,7 @@ import (
 	goimage "image"
 	gocolor "image/color"
 	"image/draw"
+
 	// Imported for initialization side effects.
 	_ "image/gif"
 	_ "image/png"

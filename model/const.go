@@ -7,9 +7,6 @@ package model
 
 import (
 	"errors"
-	"fmt"
-
-	"github.com/negbie/unipdf-agpl/v3/core"
 )
 
 // Errors when parsing/loading data in PDF.
@@ -18,11 +15,11 @@ var (
 	ErrRequiredAttributeMissing = errors.New("required attribute missing")
 	ErrInvalidAttribute         = errors.New("invalid attribute")
 	ErrTypeCheck                = errors.New("type check")
-	ErrRange                    = errors.New("range check error")
+	errRangeError               = errors.New("range check error")
 	ErrEncrypted                = errors.New("file needs to be decrypted first")
 	ErrNoFont                   = errors.New("font not defined")
-	ErrFontNotSupported         = fmt.Errorf("unsupported font (%v)", core.ErrNotSupported)
-	ErrType1CFontNotSupported   = fmt.Errorf("Type1C fonts are not currently supported (%v)", core.ErrNotSupported)
-	ErrType3FontNotSupported    = fmt.Errorf("Type3 fonts are not currently supported (%v)", core.ErrNotSupported)
-	ErrTTCmapNotSupported       = fmt.Errorf("unsupported TrueType cmap format (%v)", core.ErrNotSupported)
+	ErrFontNotSupported         = errors.New("unsupported font")
+	ErrType1CFontNotSupported   = errors.New("Type1C fonts are not currently supported")
+	ErrType3FontNotSupported    = errors.New("Type3 fonts are not currently supported")
+	ErrTTCmapNotSupported       = errors.New("unsupported TrueType cmap format")
 )
