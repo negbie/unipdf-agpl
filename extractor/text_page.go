@@ -38,7 +38,7 @@ import (
 // 3) Detect textParas arranged as cells in a table and convert each one to a textPara containing a
 //    textTable.
 // 4) Sort the textParas in reading order.
-func makeTextPage(marks []*textMark, pageSize model.PdfRectangle, performParagraphMerge bool) paraList {
+func makeTextPage(marks []*textMark, pageSize model.PdfRectangle) paraList {
 	common.Log.Trace("makeTextPage: %d elements pageSize=%.2f", len(marks), pageSize)
 	if len(marks) == 0 {
 		return nil
@@ -49,44 +49,56 @@ func makeTextPage(marks []*textMark, pageSize model.PdfRectangle, performParagra
 	if len(words) == 0 {
 		return nil
 	}
-
+	if false {
+		common.Log.Info("makeTextPage: %d marks %d words", len(marks), len(words))
+		texts := make([]string, 0, len(words))
+		set := map[string]bool{}
+		for _, w := range words {
+			if _, ok := set[w.text]; ok {
+				continue
+			}
+			if len([]rune(w.text)) == 0 {
+				continue
+			}
+			set[w.text] = true
+			texts = append(texts, w.text)
+		}
+		sort.Strings(texts)
+		for _, w := range texts {
+			fmt.Printf("%q\n", w)
+		}
+		fmt.Println("============")
+	}
 	// Put the word fragments into a container that facilitates the grouping of words into paragraphs.
 	pageWords := makeWordBag(words, pageSize.Ury)
 
-	if performParagraphMerge {
+	// Divide the page into rectangular regions for each paragraph and creata a wordBag for each one.
+	paraWords := dividePage(pageWords, pageSize.Ury)
+	paraWords = mergeWordBags(paraWords)
 
-		// Divide the page into rectangular regions for each paragraph and creata a wordBag for each one.
-		paraWords := dividePage(pageWords, pageSize.Ury)
-		paraWords = mergeWordBags(paraWords)
-
-		// Arrange the contents of each paragraph wordBag into lines and the lines into whole words.
-		paras := make(paraList, 0, len(paraWords))
-		for _, bag := range paraWords {
-			para := bag.arrangeText()
-			if para != nil {
-				paras = append(paras, para)
-			}
-		}
-
-		// Find paras that are cells in tables, convert the tables to paras and remove the cell paras.
-		if len(paras) >= minTableParas {
-			paras = paras.extractTables()
-		}
-
-		// Sort the paras into reading order.
-		paras.sortReadingOrder()
-		paras.log("sorted in reading order")
-
-		return paras
-	} else {
-		paras := make(paraList, 0, len(words))
-		for _, word := range words {
-			bag := newWordBag(word, pageSize.Ury)
-			para := bag.arrangeText()
+	// Arrange the contents of each paragraph wordBag into lines and the lines into whole words.
+	paras := make(paraList, 0, len(paraWords))
+	for _, bag := range paraWords {
+		para := bag.arrangeText()
+		if para != nil {
 			paras = append(paras, para)
 		}
-		return paras
 	}
+
+	// Find paras that are cells in tables, convert the tables to paras and remove the cell paras.
+	if len(paras) >= minTableParas {
+		paras = paras.extractTables()
+	}
+
+	// Sort the paras into reading order.
+	paras.sortReadingOrder()
+	paras.log("sorted in reading order")
+
+	return paras
+}
+
+func (b *wordBag) area() float64 {
+	return b.Width() * b.Height()
 }
 
 // dividePage divides `pageWords`, the page wordBag, into a list of paragraph wordBags.
@@ -103,6 +115,7 @@ func dividePage(pageWords *wordBag, pageHeight float64) []*wordBag {
 
 	for _, depthIdx := range pageWords.depthIndexes() {
 		changed := false
+		// common.Log.Info("--------- depthIdx=%d", depthIdx)
 		for !pageWords.empty(depthIdx) {
 			// Start a new paragraph region `paraWords`.
 			// Build `paraWords` out from the left-most (lowest in reading direction) word `words`[0],
@@ -114,40 +127,54 @@ func dividePage(pageWords *wordBag, pageHeight float64) []*wordBag {
 			firstWord := pageWords.firstWord(firstReadingIdx)
 			paraWords := newWordBag(firstWord, pageHeight)
 			pageWords.removeWord(firstWord, firstReadingIdx)
-			if verbosePage {
-				common.Log.Info("words[0]=%s", firstWord.String())
+			if verboseBag {
+				common.Log.Info("firstWord ^^^^ %s", firstWord.String())
 			}
 
 			// The following 3 numbers define whether words should be added to `paraWords`.
-			minInterReadingGap := minInterReadingGapR * paraWords.fontsize
-			maxIntraReadingGap := maxIntraReadingGapR * paraWords.fontsize
-			maxIntraDepthGap := maxIntraDepthGapR * paraWords.fontsize
+			// minInterReadingGap := minInterReadingGapR * paraWords.fontsize
+			// maxIntraReadingGap := maxIntraReadingGapR * paraWords.fontsize
+			// maxIntraDepthGap := maxIntraDepthGapR * paraWords.fontsize
 
 			// Add words to `paraWords` until we pass through the following loop without adding a
 			// new word.
 			for running := true; running; running = changed {
 				changed = false
 
+				// The following 3 numbers define whether words should be added to `paraWords`.
+				minInterReadingGap := minInterReadingGapR * paraWords.fontsize
+				maxIntraReadingGap := maxIntraReadingGapR * paraWords.fontsize
+				maxIntraDepthGap := maxIntraDepthGapR * paraWords.fontsize
+
+				// maxDepth := paraWords.maxDepth()
+				// r0 := paraWords.PdfRectangle
+
 				// Add words that are within maxIntraDepthGap of `paraWords` in the depth direction.
 				// i.e. Stretch paraWords in the depth direction, vertically for English text.
-				if verbosePage {
-					common.Log.Info("paraWords depth %.2f - %.2f maxIntraDepthGap=%.2f ",
-						paraWords.minDepth(), paraWords.maxDepth(), maxIntraDepthGap)
+				if verboseBag {
+					common.Log.Info("paraWords depth %.2f - %.2f maxIntraDepthGap=%.2f maxIntraReadingGap=%.2f",
+						paraWords.minDepth(), paraWords.maxDepth(), maxIntraDepthGap, maxIntraReadingGap)
 				}
 				if pageWords.scanBand("vertical", paraWords, partial(readingOverlapPlusGap, 0),
 					paraWords.minDepth()-maxIntraDepthGap, paraWords.maxDepth()+maxIntraDepthGap,
-					maxIntraDepthFontTolR, false, false) > 0 {
+					maxIntraDepthFontTolR, false, false) > 0 { // !@#$ maxIntraDepthFontTolR or maxIntraReadingFontTol
 					changed = true
 				}
 				// Add words that are within maxIntraReadingGap of `paraWords` in the reading direction.
-				// i.e. Stretch paraWords in the reading direction, horizontall for English text.
+				// i.e. Stretch paraWords in the reading direction, horizontally for English text.
 				if pageWords.scanBand("horizontal", paraWords, partial(readingOverlapPlusGap, maxIntraReadingGap),
 					paraWords.minDepth(), paraWords.maxDepth(),
-					maxIntraReadingFontTol, false, false) > 0 {
+					maxIntraReadingFontTol, false, false) > 0 { // !@#$ maxIntraDepthFontTolR or maxIntraReadingFontTol
 					changed = true
 				}
 				// The above stretching has got as far as it can go. Repeating it won't pull in more words.
 
+				// if verbose {
+				// 	common.Log.Info(" ####1 %.2f → %.2f %.2f", r0, paraWords.PdfRectangle, paraWords.area())
+				// }
+				// if paraWords.maxDepth() > maxDepth+100 {
+				// 	panic(fmt.Errorf("%.2f → %.2f", maxDepth, paraWords.maxDepth()))
+				// }
 				// Only try to combine other words if we can't grow paraWords in the simple way above.
 				if changed {
 					continue
@@ -180,6 +207,12 @@ func dividePage(pageWords *wordBag, pageHeight float64) []*wordBag {
 						}
 					}
 				}
+				// if verbose {
+				// 	common.Log.Info(" $$$$2 %.2f → %.2f %.2f", r0, paraWords.PdfRectangle, paraWords.area())
+				// }
+				// if paraWords.maxDepth() > maxDepth+100 {
+				// 	panic(fmt.Errorf("%.2f → %.2f", maxDepth, paraWords.maxDepth()))
+				// }
 			}
 			paraWordBags = append(paraWordBags, paraWords)
 		}
@@ -236,8 +269,9 @@ func sameLine(para1, para2 *textPara) bool {
 func (paras paraList) tables() []TextTable {
 	var tables []TextTable
 	for _, para := range paras {
-		if para.table != nil {
-			tables = append(tables, para.table.toTextTable())
+		t := para.table
+		if t != nil && t.exportableTable() {
+			tables = append(tables, t.toTextTable())
 		}
 	}
 	return tables
@@ -375,7 +409,7 @@ func (paras paraList) computeEBBoxes() {
 	for _, para := range paras {
 		para.eBBox = para.PdfRectangle
 	}
-	paraYNeighbours := paras.yNeighbours()
+	paraYNeighbours := paras.yNeighbours(0)
 
 	for i, aa := range paras {
 		a := aa.eBBox
@@ -411,7 +445,7 @@ func (paras paraList) computeEBBoxes() {
 			}
 		}
 		if verbose {
-			fmt.Printf("%4d: %6.2f->%6.2f %q\n", i, aa.eBBox, a, truncate(aa.text(), 50))
+			fmt.Printf("%4d: %6.2f→%6.2f %q\n", i, aa.eBBox, a, truncate(aa.text(), 50))
 		}
 		aa.eBBox = a
 	}

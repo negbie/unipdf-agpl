@@ -52,6 +52,9 @@ var doStress bool
 func init() {
 	flag.BoolVar(&doStress, "extractor-stresstest", false, "Run text extractor stress tests.")
 	common.SetLogger(common.NewConsoleLogger(common.LogLevelInfo))
+	common.Log.Info("      forceTest=%t", forceTest)
+	common.Log.Info("   corpusFolder=%q", corpusFolder)
+	common.Log.Info("referenceFolder=%q", referenceFolder)
 	isTesting = true
 }
 
@@ -151,7 +154,7 @@ func TestTextExtractionFiles(t *testing.T) {
 	}
 	for _, test := range fileExtractionTests {
 		// TODO(peterwilliams97): Remove non-lazy test.
-		testExtractFileOptions(t, test.filename, test.pageTerms, false)
+		// testExtractFileOptions(t, test.filename, test.pageTerms, false)
 		testExtractFileOptions(t, test.filename, test.pageTerms, true)
 	}
 }
@@ -190,7 +193,7 @@ func TestTextExtractionReference(t *testing.T) {
 		return
 	}
 	for _, er := range extractReferenceTests {
-		er.runTest(t)
+		er.runTextTest(t)
 	}
 }
 
@@ -300,16 +303,10 @@ var fileExtractionTests = []struct {
 // testExtractFile tests the ExtractTextWithStats text extractor on `filename` and compares the
 // extracted text to `pageTerms`. If `lazy` is true, the PDF is lazily loaded.
 func testExtractFileOptions(t *testing.T, filename string, pageTerms map[int][]string, lazy bool) {
-	filepath := filepath.Join(corpusFolder, filename)
-	exists := checkFileExists(filepath)
-	if !exists {
-		if forceTest {
-			t.Fatalf("filepath=%q does not exist", filepath)
-		}
-		t.Logf("%q not found", filepath)
+	filepath, exists := corpusFilepath(t, filename)
+	if !forceTest && !exists {
 		return
 	}
-
 	_, actualPageText := extractPageTexts(t, filepath, lazy)
 	for _, pageNum := range sortedKeys(pageTerms) {
 		expectedTerms, ok := pageTerms[pageNum]
@@ -341,7 +338,7 @@ func extractPageTexts(t *testing.T, filename string, lazy bool) (int, map[int]st
 	if err != nil {
 		t.Fatalf("GetNumPages failed. filename=%q err=%v", filename, err)
 	}
-	pageText := map[int]string{}
+	pageText := make(map[int]string)
 	for pageNum := 1; pageNum <= numPages; pageNum++ {
 		page, err := pdfReader.GetPage(pageNum)
 		if err != nil {
@@ -598,7 +595,14 @@ func (c pageContents) testPageTextAndMarks(t *testing.T, l *markupList, desc str
 		}
 	}
 
-	// 2) is missing for historical reasons.
+	// XXX(peterwilliams97): The new text extraction changes TextMark contents. From now on we
+	// only test their behaviour, not their implementation.
+	// // 2) Check that all expected TextMarks are in `textMarks`.
+	// offsetMark := marksMap(textMarks)
+	// for i, tm := range c.marks {
+	// 	common.Log.Debug("%d: %v", i, tm)
+	// 	checkContains(t, desc, offsetMark, tm)
+	// }
 
 	// 3) Check that locationsIndex() finds TextMarks in `textMarks` corresponding to some
 	//   substrings of `text`.
@@ -643,6 +647,10 @@ func testTermMarksFiles(t *testing.T) {
 		t.Fatalf("Glob(%q) failed. err=%v", pattern, err)
 	}
 	for i, filename := range pathList {
+		// 4865ab395ed664c3ee17.pdf is a corrupted file in the test corpus.
+		if strings.Contains(filename, "4865ab395ed664c3ee17.pdf") {
+			continue
+		}
 		common.Log.Info("%4d of %d: %q", i+1, len(pathList), filename)
 		tryTestTermMarksFile(t, filename, true)
 	}
@@ -703,10 +711,26 @@ type extractReference struct {
 	pageNum  int
 }
 
-// runTest runs the test described by `er`. It checks that the text extracted from the page of the
+// runTextTest runs the test described by `er`. It checks that the text extracted from the page of the
 // PDF matches the reference text file.
-func (er extractReference) runTest(t *testing.T) {
+func (er extractReference) runTextTest(t *testing.T) {
 	compareExtractedTextToReference(t, er.pdfPath(), er.pageNum, er.textPath())
+}
+
+// runTextTest runs the test described by `er`. It checks that the text extracted from the page of the
+// PDF matches the reference text file.
+func (er extractReference) runTableTest(t *testing.T) {
+	csvPaths, err := er.tablePaths()
+	if err != nil {
+		t.Fatalf("tablePaths: err=%v", err)
+	}
+	if len(csvPaths) == 0 {
+		t.Fatalf("tablePaths: No csv paths")
+	}
+	common.Log.Notice("runTableTest: %q pageNum=%d csvPaths=%d:%q",
+		er.pdfPath(), er.pageNum, len(csvPaths), csvPaths)
+
+	compareExtractedTablesToReference(t, er.pdfPath(), er.pageNum, csvPaths)
 }
 
 // pdfPath returns the path of the PDF file for test `er`.
@@ -718,6 +742,15 @@ func (er extractReference) pdfPath() string {
 func (er extractReference) textPath() string {
 	pageStr := fmt.Sprintf("page%03d", er.pageNum)
 	return changeDirExt(referenceFolder, er.filename, pageStr, ".txt")
+}
+
+// COVID-19.page4.table1.csv
+func (er extractReference) tablePaths() ([]string, error) {
+	pageStr := fmt.Sprintf("page%03d.table*", er.pageNum)
+	pattern := changeDirExt(referenceFolder, er.filename, pageStr, ".csv")
+	paths, err := filepath.Glob(pattern)
+	common.Log.Notice("Glob(%q)=%d %q", pattern, len(paths), paths)
+	return paths, err
 }
 
 // compareExtractedTextToReference extracts text from (1-offset) page `pageNum` of PDF `filename`
@@ -748,11 +781,27 @@ func compareExtractedTextToReference(t *testing.T, filename string, pageNum int,
 	}
 	actualText, _ := pageTextAndMarks(t, desc, page)
 
-	actualText = reduceSpaces(norm.NFKC.String(actualText))
-	expectedText = reduceSpaces(norm.NFKC.String(expectedText))
+	actualText = normalize(actualText)
+	expectedText = normalize(expectedText)
 	if actualText != expectedText {
-		common.Log.Info("actual   =====================\n%s\n=====================", actualText)
-		common.Log.Info("expected =====================\n%s\n=====================", expectedText)
+		common.Log.Info("actual   ===================== %d\n%s\n=====================", len(actualText), actualText)
+		common.Log.Info("expected ===================== %d\n%s\n=====================", len(expectedText), expectedText)
+		at := []rune(actualText)
+		et := []rune(expectedText)
+		n := minInt(len(at), len(et))
+		i0 := -1
+		for i := 0; i < n; i++ {
+			if at[i] != et[i] {
+				i0 = i
+				break
+			}
+		}
+		common.Log.Info("i0=%d", i0)
+		i1 := minInt(i0+10, n)
+		i0 = maxInt(i0-10, 0)
+		for i := i0; i < i1; i++ {
+			fmt.Printf("%4d: %4q %q\n", i, at[i], et[i])
+		}
 		t.Fatalf("Text mismatch filename=%q page=%d", filename, pageNum)
 	}
 }
@@ -776,7 +825,7 @@ func testTermMarks(t *testing.T, text string, textMarks *TextMarkArray, n int) {
 		return
 	}
 	common.Log.Debug("testTermMarks: text=%d n=%d", len(text), n)
-	// We build our substrings out of whole runes, not fragments of utf-8 codes from the text
+	// We build our substrings out of whole runes, not fragments of utf-8 codes from the text.
 	runes := []rune(text)
 	if n > len(runes)/2 {
 		n = len(runes) / 2
@@ -989,6 +1038,11 @@ func containsTerms(t *testing.T, terms []string, actualText string) bool {
 	return true
 }
 
+// normalize returns a version of `text` that is NFKC normalized and has reduceSpaces() applied.
+func normalize(text string) string {
+	return reduceSpaces(norm.NFKC.String(text))
+}
+
 // reduceSpaces returns `text` with runs of spaces of any kind (spaces, tabs, line breaks, etc)
 // reduced to a single space.
 func reduceSpaces(text string) string {
@@ -1113,7 +1167,7 @@ func (l *markupList) saveOutputPdf() {
 		mediaBox, err := page.GetMediaBox()
 		if err == nil && page.MediaBox == nil {
 			// Deal with MediaBox inherited from Parent.
-			common.Log.Info("MediaBox: %v -> %v", page.MediaBox, mediaBox)
+			common.Log.Info("MediaBox: %v → %v", page.MediaBox, mediaBox)
 			page.MediaBox = mediaBox
 		}
 		h := mediaBox.Ury
@@ -1162,7 +1216,7 @@ func changeDirExt(dirName, filename, qualifier, extName string) string {
 	}
 	filename = fmt.Sprintf("%s%s", base, extName)
 	path := filepath.Join(dirName, filename)
-	common.Log.Debug("changeDirExt(%q,%q,%q)->%q", dirName, base, extName, path)
+	common.Log.Debug("changeDirExt(%q,%q,%q)→%q", dirName, base, extName, path)
 	return path
 }
 
@@ -1175,4 +1229,19 @@ func readTextFile(filename string) (string, error) {
 	defer f.Close()
 	b, err := ioutil.ReadAll(f)
 	return string(b), err
+}
+
+// corpusFilepath returns the full path of `filename` in the corpus directory.
+// NOTE: Caller must check the corpus is present of the local computer
+func corpusFilepath(t *testing.T, filename string) (string, bool) {
+	fullpath := filepath.Join(corpusFolder, filename)
+	exists := checkFileExists(fullpath)
+	if !exists {
+		if forceTest {
+			t.Fatalf("filepath=%q does not exist. ", fullpath)
+		} else {
+			t.Logf("filepath=%q does not exist. Skipping test.", fullpath)
+		}
+	}
+	return fullpath, exists
 }

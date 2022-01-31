@@ -53,6 +53,12 @@ func makeTextWords(marks []*textMark, pageSize model.PdfRectangle) []*textWord {
 			if !isTextSpace(text) {
 				newWord.text = text
 				words = append(words, newWord)
+				if verbose {
+					common.Log.Info("word=%s", newWord.String())
+					for i, tm := range newWord.marks {
+						fmt.Printf("%4d: %s\n", i, tm.String())
+					}
+				}
 			}
 			newWord = nil
 		}
@@ -133,10 +139,6 @@ func newTextWord(marks []*textMark, pageSize model.PdfRectangle) *textWord {
 func (w *textWord) String() string {
 	return fmt.Sprintf("%.2f %6.2f fontsize=%.2f \"%s\"",
 		w.depth, w.PdfRectangle, w.fontsize, w.text)
-}
-
-func (w textWord) DebugString() string {
-	return w.text
 }
 
 // bbox makes textWord implement the `bounded` interface.

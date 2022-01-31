@@ -8,6 +8,7 @@ package extractor
 import (
 	"fmt"
 
+	"github.com/negbie/unipdf-agpl/v3/common"
 	"github.com/negbie/unipdf-agpl/v3/model"
 )
 
@@ -31,8 +32,6 @@ type Extractor struct {
 
 	// textCount is an incrementing number used to identify XYTest objects.
 	textCount int
-
-	PerformParagraphMerge bool
 }
 
 // New returns an Extractor instance for extracting content from the input PDF page.
@@ -57,7 +56,15 @@ func New(page *model.PdfPage) (*Extractor, error) {
 		mediaBox:    *mediaBox,
 		fontCache:   map[string]fontEntry{},
 		formResults: map[string]textResult{},
-		PerformParagraphMerge: true,
+	}
+
+	if e.mediaBox.Llx > e.mediaBox.Urx {
+		common.Log.Info("MediaBox has X coordinates reversed. %.2f Fixing.", e.mediaBox)
+		e.mediaBox.Llx, e.mediaBox.Urx = e.mediaBox.Urx, e.mediaBox.Llx
+	}
+	if e.mediaBox.Lly > e.mediaBox.Ury {
+		common.Log.Info("MediaBox has Y coordinates reversed. %.2f Fixing.", e.mediaBox)
+		e.mediaBox.Lly, e.mediaBox.Ury = e.mediaBox.Ury, e.mediaBox.Lly
 	}
 	return e, nil
 }
@@ -69,7 +76,6 @@ func NewFromContents(contents string, resources *model.PdfPageResources) (*Extra
 		resources:   resources,
 		fontCache:   map[string]fontEntry{},
 		formResults: map[string]textResult{},
-		PerformParagraphMerge: true,
 	}
 	return e, nil
 }

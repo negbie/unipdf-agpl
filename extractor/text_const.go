@@ -7,13 +7,18 @@ package extractor
 
 // The follow constant configure debugging.
 const (
-	verbose         = false
-	verboseGeom     = false
-	verbosePage     = false
-	verbosePara     = false
-	verboseParaLine = verbosePara && false
-	verboseParaWord = verboseParaLine && false
-	verboseTable    = false
+	verbose           = false
+	verboseGeom       = false
+	verboseShape      = false
+	verboseText       = false
+	verboseBag        = false
+	verbosePage       = false
+	verbosePara       = false
+	verboseParaLine   = verbosePara && true
+	verboseParaWord   = verboseParaLine && false
+	verboseParaDup    = verbosePara && true
+	verboseTable      = false
+	verboseTableError = verboseTable || false
 )
 
 // The following constants control the approaches used in the code.
@@ -22,6 +27,11 @@ const (
 	doRemoveDuplicates  = true
 	doCombineDiacritics = true
 	useEBBox            = false
+	advancedTables      = true
+
+	tableCircumf = 6
+	tableYGapR   = 3.0
+	tableBigText = 200
 )
 
 // The following constants are the tuning parameter for text extracton
@@ -85,4 +95,7 @@ const (
 
 	// Minimum number of cells in a textTable
 	minTableParas = 6
+
+	cellMarginX = 0.2
+	cellMarginY = 0.3
 )
